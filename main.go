@@ -3,9 +3,6 @@ package main
 import (
 	"time"
 
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/systray"
 
 	"github.com/mpdroog/ezhours/icon"
@@ -15,27 +12,17 @@ import (
 )
 
 var (
-	fyneApp     fyne.App
 	timerState  *timer.Timer
 	stopUpdater chan struct{}
 	dialogOpen  bool
+	mToggle     *systray.MenuItem
 )
 
 func main() {
 	timerState = timer.New()
 	stopUpdater = make(chan struct{})
 
-	// Register systray before starting Fyne
-	systray.Register(onReady, onExit)
-
-	fyneApp = app.New()
-
-	// Set app to run as system tray only (no dock icon on macOS)
-	if drv, ok := fyneApp.Driver().(desktop.Driver); ok {
-		_ = drv // Driver supports desktop features
-	}
-
-	fyneApp.Run()
+	systray.Run(onReady, onExit)
 }
 
 func onReady() {
@@ -43,19 +30,27 @@ func onReady() {
 	systray.SetTooltip("EZHours - Click to start/stop timer")
 
 	// Menu items
+	mToggle = systray.AddMenuItem("Start Timer", "Start tracking time")
+	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit", "Exit EZHours")
 
 	// Handle tray icon click
 	systray.SetOnTapped(onTrayClicked)
 
 	go func() {
-		<-mQuit.ClickedCh
-		systray.Quit()
+		for {
+			select {
+			case <-mToggle.ClickedCh:
+				onTrayClicked()
+			case <-mQuit.ClickedCh:
+				systray.Quit()
+			}
+		}
 	}()
 }
 
 func onExit() {
-	fyneApp.Quit()
+	// Cleanup
 }
 
 func onTrayClicked() {
@@ -75,25 +70,19 @@ func onTrayClicked() {
 
 		// Show save dialog
 		dialogOpen = true
-		ui.ShowSaveDialog(
-			fyneApp,
-			timerState.StartTime(),
-			timerState.EndTime(),
-			func(project, description string) {
-				// Save entry
-				storage.SaveEntry(project, timerState.StartTime(), timerState.EndTime(), description)
-				systray.SetTitle("")
-				dialogOpen = false
-			},
-			func() {
-				// Cancelled
-				systray.SetTitle("")
-				dialogOpen = false
-			},
-		)
+		go func() {
+			result := ui.ShowSaveDialog(timerState.StartTime(), timerState.EndTime())
+			if !result.Cancelled && result.Project != "" {
+				storage.SaveEntry(result.Project, timerState.StartTime(), timerState.EndTime(), result.Description)
+			}
+			systray.SetTitle("")
+			updateMenuText("Start Timer")
+			dialogOpen = false
+		}()
 	} else {
 		// Start timer
 		timerState.Start()
+		updateMenuText("Stop Timer")
 
 		// Start goroutine to update title every second
 		go updateTitle()
@@ -118,5 +107,11 @@ func updateTitle() {
 		case <-stopUpdater:
 			return
 		}
+	}
+}
+
+func updateMenuText(text string) {
+	if mToggle != nil {
+		mToggle.SetTitle(text)
 	}
 }
