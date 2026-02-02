@@ -26,7 +26,8 @@ func main() {
 }
 
 func onReady() {
-	systray.SetIcon(icon.Data)
+	// Use template icon - macOS will automatically handle light/dark mode
+	systray.SetTemplateIcon(icon.Data, icon.Data)
 	systray.SetTooltip("EZHours - Click to start/stop timer")
 
 	// Menu items
