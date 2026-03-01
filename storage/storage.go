@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/mpdroog/ezhours/apptracker"
 )
 
 var HoursDir = "hours"
@@ -35,7 +37,7 @@ func GetProjects() ([]string, error) {
 }
 
 // SaveEntry appends a time entry to the project file
-func SaveEntry(project string, start, end time.Time, description string) error {
+func SaveEntry(project string, start, end time.Time, description string, appUsage []apptracker.AppUsage) error {
 	if err := os.MkdirAll(HoursDir, 0755); err != nil {
 		return err
 	}
@@ -78,6 +80,23 @@ func SaveEntry(project string, start, end time.Time, description string) error {
 				f.WriteString(line + "\n")
 			}
 		}
+	}
+
+	// App usage - write as indented list
+	if len(appUsage) > 0 {
+		f.WriteString("  [Apps: ")
+		apps := make([]string, 0, len(appUsage))
+		for _, app := range appUsage {
+			mins := int(app.Duration.Minutes())
+			if mins > 0 {
+				apps = append(apps, fmt.Sprintf("%s %dm", app.Name, mins))
+			} else {
+				secs := int(app.Duration.Seconds())
+				apps = append(apps, fmt.Sprintf("%s %ds", app.Name, secs))
+			}
+		}
+		f.WriteString(strings.Join(apps, ", "))
+		f.WriteString("]\n")
 	}
 
 	return nil

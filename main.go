@@ -5,6 +5,7 @@ import (
 
 	"fyne.io/systray"
 
+	"github.com/mpdroog/ezhours/apptracker"
 	"github.com/mpdroog/ezhours/icon"
 	"github.com/mpdroog/ezhours/storage"
 	"github.com/mpdroog/ezhours/timer"
@@ -13,6 +14,7 @@ import (
 
 var (
 	timerState  *timer.Timer
+	appTracker  *apptracker.Tracker
 	stopUpdater chan struct{}
 	dialogOpen  bool
 	mToggle     *systray.MenuItem
@@ -20,6 +22,7 @@ var (
 
 func main() {
 	timerState = timer.New()
+	appTracker = apptracker.New()
 	stopUpdater = make(chan struct{})
 
 	systray.Run(onReady, onExit)
@@ -60,8 +63,9 @@ func onTrayClicked() {
 	}
 
 	if timerState.IsRunning() {
-		// Stop timer
+		// Stop timer and app tracker
 		timerState.Stop()
+		appTracker.Stop()
 
 		// Stop the title updater
 		select {
@@ -69,20 +73,24 @@ func onTrayClicked() {
 		default:
 		}
 
+		// Get app usage data
+		appUsage := appTracker.GetUsage()
+
 		// Show save dialog
 		dialogOpen = true
 		go func() {
 			result := ui.ShowSaveDialog(timerState.StartTime(), timerState.EndTime())
 			if !result.Cancelled && result.Project != "" {
-				storage.SaveEntry(result.Project, timerState.StartTime(), timerState.EndTime(), result.Description)
+				storage.SaveEntry(result.Project, timerState.StartTime(), timerState.EndTime(), result.Description, appUsage)
 			}
 			systray.SetTitle("")
 			updateMenuText("Start Timer")
 			dialogOpen = false
 		}()
 	} else {
-		// Start timer
+		// Start timer and app tracker
 		timerState.Start()
+		appTracker.Start()
 		updateMenuText("Stop Timer")
 
 		// Start goroutine to update title every second
