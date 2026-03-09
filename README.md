@@ -22,3 +22,4 @@ Run the app and click the tray icon to start/stop tracking. When you stop, a dia
 
 - macOS
 - Windows
+- Linux (tested on Mint)

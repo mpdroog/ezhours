@@ -35,7 +35,52 @@ func ShowSaveDialog(startTime, endTime time.Time) DialogResult {
 	case "windows":
 		return showWindowsDialog(projects, timeInfo)
 	default:
-		return showMacDialog(projects, timeInfo) // fallback
+		return showLinuxDialog(projects, timeInfo)
+	}
+}
+
+func showLinuxDialog(projects []string, timeInfo string) DialogResult {
+	// Step 1: pick or enter a project via zenity
+	args := []string{"--list", "--title=EZHours - Save Entry",
+		"--text=Select project for:\n" + timeInfo,
+		"--column=Project", "--editable"}
+	args = append(args, projects...)
+	args = append(args, "+ New Project...")
+
+	cmd := exec.Command("zenity", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return DialogResult{Cancelled: true}
+	}
+	project := strings.TrimSpace(string(out))
+	if project == "" || project == "+ New Project..." {
+		// Ask for new project name
+		cmd2 := exec.Command("zenity", "--entry",
+			"--title=EZHours - New Project",
+			"--text=Enter new project name:")
+		out2, err2 := cmd2.Output()
+		if err2 != nil {
+			return DialogResult{Cancelled: true}
+		}
+		project = strings.TrimSpace(string(out2))
+		if project == "" {
+			return DialogResult{Cancelled: true}
+		}
+	}
+
+	// Step 2: enter description
+	cmd3 := exec.Command("zenity", "--entry",
+		"--title=EZHours - Description",
+		fmt.Sprintf("--text=What did you work on?\n\n%s", timeInfo))
+	out3, err3 := cmd3.Output()
+	if err3 != nil {
+		return DialogResult{Cancelled: true}
+	}
+
+	return DialogResult{
+		Project:     project,
+		Description: strings.TrimSpace(string(out3)),
+		Cancelled:   false,
 	}
 }
 

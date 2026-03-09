@@ -13,6 +13,18 @@ import (
 
 var HoursDir = "hours"
 
+// GetHoursDir returns the absolute path to the hours directory, creating it if needed.
+func GetHoursDir() (string, error) {
+	abs, err := filepath.Abs(HoursDir)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(abs, 0755); err != nil {
+		return "", err
+	}
+	return abs, nil
+}
+
 // GetProjects returns list of existing project names from hours/*.txt files
 func GetProjects() ([]string, error) {
 	entries, err := os.ReadDir(HoursDir)

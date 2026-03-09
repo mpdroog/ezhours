@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os/exec"
+	"runtime"
 	"time"
 
 	"fyne.io/systray"
@@ -36,16 +38,23 @@ func onReady() {
 	// Menu items
 	mToggle = systray.AddMenuItem("Start Timer", "Start tracking time")
 	systray.AddSeparator()
+	mOpenDir := systray.AddMenuItem("Open Hours Folder", "Open the hours folder in file manager")
+	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit", "Exit EZHours")
 
-	// Handle tray icon click
-	systray.SetOnTapped(onTrayClicked)
+	// On macOS/Windows left-click toggles the timer directly.
+	// On Linux, skip SetOnTapped so ItemIsMenu=true and left-click opens the menu instead.
+	if runtime.GOOS != "linux" {
+		systray.SetOnTapped(onTrayClicked)
+	}
 
 	go func() {
 		for {
 			select {
 			case <-mToggle.ClickedCh:
 				onTrayClicked()
+			case <-mOpenDir.ClickedCh:
+				openHoursDir()
 			case <-mQuit.ClickedCh:
 				systray.Quit()
 			}
@@ -84,6 +93,8 @@ func onTrayClicked() {
 				storage.SaveEntry(result.Project, timerState.StartTime(), timerState.EndTime(), result.Description, appUsage)
 			}
 			systray.SetTitle("")
+			systray.SetTooltip("EZHours - Click to start/stop timer")
+			systray.SetTemplateIcon(icon.Data, icon.Data)
 			updateMenuText("Start Timer")
 			dialogOpen = false
 		}()
@@ -102,14 +113,29 @@ func updateTitle() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
+	blink := false
+	update := func() {
+		elapsed := timer.FormatDuration(timerState.Elapsed())
+		systray.SetTitle(elapsed)
+		systray.SetTooltip("EZHours - Recording: " + elapsed)
+		updateMenuText("Stop Timer (" + elapsed + ")")
+		// Blink between normal and active icon each second
+		if blink {
+			systray.SetIcon(icon.ActiveData())
+		} else {
+			systray.SetTemplateIcon(icon.Data, icon.Data)
+		}
+		blink = !blink
+	}
+
 	// Initial update
-	systray.SetTitle(timer.FormatDuration(timerState.Elapsed()))
+	update()
 
 	for {
 		select {
 		case <-ticker.C:
 			if timerState.IsRunning() {
-				systray.SetTitle(timer.FormatDuration(timerState.Elapsed()))
+				update()
 			} else {
 				return
 			}
@@ -123,4 +149,21 @@ func updateMenuText(text string) {
 	if mToggle != nil {
 		mToggle.SetTitle(text)
 	}
+}
+
+func openHoursDir() {
+	dir, err := storage.GetHoursDir()
+	if err != nil {
+		return
+	}
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", dir)
+	case "windows":
+		cmd = exec.Command("explorer", dir)
+	default:
+		cmd = exec.Command("xdg-open", dir)
+	}
+	cmd.Start()
 }
