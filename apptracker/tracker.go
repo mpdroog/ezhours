@@ -1,9 +1,18 @@
 package apptracker
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 	"time"
+)
+
+const (
+	// minDuration is the least time an app must be focused to be listed on its
+	// own. The poll interval is 2s, so anything shorter is noise.
+	minDuration = time.Minute
+	// maxApps caps how many apps are listed before the rest is summarised.
+	maxApps = 8
 )
 
 // AppUsage represents time spent in an application
@@ -67,24 +76,53 @@ func (t *Tracker) Stop() {
 	}
 }
 
-// GetUsage returns a sorted list of app usage (most used first)
+// GetUsage returns a sorted, summarised list of app usage (most used first).
 func (t *Tracker) GetUsage() []AppUsage {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
+	return Summarize(t.appTime)
+}
+
+// Summarize sorts app time by duration and folds everything below minDuration
+// or past maxApps into a single "other" entry, so a session summary stays
+// readable instead of listing every window that was briefly focused.
+func Summarize(appTime map[string]time.Duration) []AppUsage {
 	var usage []AppUsage
-	for app, dur := range t.appTime {
-		if dur >= time.Second { // Only include apps used for at least 1 second
-			usage = append(usage, AppUsage{Name: app, Duration: dur})
-		}
+	for app, dur := range appTime {
+		usage = append(usage, AppUsage{Name: app, Duration: dur})
 	}
 
-	// Sort by duration (descending)
+	// Sort by duration (descending), name as tie-breaker for stable output
 	sort.Slice(usage, func(i, j int) bool {
-		return usage[i].Duration > usage[j].Duration
+		if usage[i].Duration != usage[j].Duration {
+			return usage[i].Duration > usage[j].Duration
+		}
+		return usage[i].Name < usage[j].Name
 	})
 
-	return usage
+	var (
+		top       []AppUsage
+		other     time.Duration
+		otherApps int
+	)
+	for _, u := range usage {
+		if len(top) < maxApps && u.Duration >= minDuration {
+			top = append(top, u)
+			continue
+		}
+		other += u.Duration
+		otherApps++
+	}
+
+	if other >= minDuration {
+		top = append(top, AppUsage{
+			Name:     fmt.Sprintf("other (%d apps)", otherApps),
+			Duration: other,
+		})
+	}
+
+	return top
 }
 
 func (t *Tracker) poll() {

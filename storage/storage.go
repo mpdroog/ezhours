@@ -95,23 +95,27 @@ func SaveEntry(project string, start, end time.Time, description string, appUsag
 	}
 
 	// App usage - write as indented list
-	if len(appUsage) > 0 {
-		f.WriteString("  [Apps: ")
-		apps := make([]string, 0, len(appUsage))
-		for _, app := range appUsage {
-			mins := int(app.Duration.Minutes())
-			if mins > 0 {
-				apps = append(apps, fmt.Sprintf("%s %dm", app.Name, mins))
-			} else {
-				secs := int(app.Duration.Seconds())
-				apps = append(apps, fmt.Sprintf("%s %ds", app.Name, secs))
-			}
-		}
-		f.WriteString(strings.Join(apps, ", "))
-		f.WriteString("]\n")
-	}
+	f.WriteString(FormatApps(appUsage))
 
 	return nil
+}
+
+// FormatApps renders app usage as the indented "  [Apps: ...]" line, including
+// its trailing newline. Returns "" when there is nothing to report.
+func FormatApps(appUsage []apptracker.AppUsage) string {
+	if len(appUsage) == 0 {
+		return ""
+	}
+
+	apps := make([]string, 0, len(appUsage))
+	for _, app := range appUsage {
+		if mins := int(app.Duration.Minutes()); mins > 0 {
+			apps = append(apps, fmt.Sprintf("%s %dm", app.Name, mins))
+		} else {
+			apps = append(apps, fmt.Sprintf("%s %ds", app.Name, int(app.Duration.Seconds())))
+		}
+	}
+	return "  [Apps: " + strings.Join(apps, ", ") + "]\n"
 }
 
 // needsNewDateHeader checks if the last entry in file is from a different day
