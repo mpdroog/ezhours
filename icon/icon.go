@@ -142,3 +142,43 @@ func Recolor(data []byte, c color.RGBA) []byte {
 	png.Encode(&buf, dst)
 	return buf.Bytes()
 }
+
+// WithWarningBadge draws an amber warning triangle in the top-right corner of
+// the given PNG, marking a sync that failed. Like WithRecordingDot it is drawn
+// last, after Scale and Recolor, so the badge keeps its colour; unlike the dot
+// it sits in the opposite corner, so a recording timer and a failed sync stay
+// legible at the same time.
+func WithWarningBadge(data []byte) []byte {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return data
+	}
+
+	bounds := img.Bounds()
+	badged := image.NewRGBA(bounds)
+	draw.Draw(badged, bounds, img, bounds.Min, draw.Src)
+
+	w, h := bounds.Dx(), bounds.Dy()
+	size := w * 45 / 100
+	if size < 5 {
+		size = 5
+	}
+	// Top-right corner, one pixel clear of the edge.
+	left, top := w-size-1, 1
+	cx := float64(left) + float64(size)/2
+
+	amber := color.RGBA{R: 245, G: 158, B: 11, A: 255}
+	for y := top; y <= top+size && y < h; y++ {
+		// The triangle widens from a point at the top to a full base.
+		half := float64(y-top) / float64(size) * float64(size) / 2
+		for x := int(cx - half); x <= int(cx+half); x++ {
+			if x >= 0 && x < w && y >= 0 {
+				badged.SetRGBA(x, y, amber)
+			}
+		}
+	}
+
+	var buf bytes.Buffer
+	png.Encode(&buf, badged)
+	return buf.Bytes()
+}

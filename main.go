@@ -5,6 +5,7 @@ import (
 	"log"
 	"os/exec"
 	"runtime"
+	"sync"
 	"time"
 
 	"fyne.io/systray"
@@ -29,6 +30,14 @@ var (
 
 	iconNormal []byte
 	iconActive []byte
+	// The same two icons carrying the sync warning badge.
+	iconNormalFailed []byte
+	iconActiveFailed []byte
+
+	// syncMu guards syncFailed: a sync runs on its own goroutine while the
+	// title updater repaints the icon every second.
+	syncMu     sync.Mutex
+	syncFailed bool
 )
 
 func main() {
@@ -53,13 +62,15 @@ func main() {
 		iconNormal = icon.Data
 		iconActive = icon.ActiveData()
 	}
+	iconNormalFailed = icon.WithWarningBadge(iconNormal)
+	iconActiveFailed = icon.WithWarningBadge(iconActive)
 
 	systray.Run(onReady, onExit)
 }
 
 func onReady() {
 	// Use template icon - macOS will automatically handle light/dark mode
-	systray.SetTemplateIcon(iconNormal, iconNormal)
+	setIcon(false)
 	systray.SetTooltip("EZHours - Click to start/stop timer")
 
 	// Menu items
@@ -137,7 +148,7 @@ func onTrayClicked() {
 
 			systray.SetTitle("")
 			systray.SetTooltip("EZHours - Click to start/stop timer")
-			systray.SetTemplateIcon(iconNormal, iconNormal)
+			setIcon(false)
 			updateMenuText("Start Timer")
 			dialogOpen = false
 
@@ -173,11 +184,7 @@ func updateTitle() {
 		systray.SetTooltip("EZHours - Recording: " + elapsed)
 		updateMenuText("Stop Timer (" + elapsed + ")")
 		// Blink between normal and active icon each second
-		if blink {
-			systray.SetIcon(iconActive)
-		} else {
-			systray.SetTemplateIcon(iconNormal, iconNormal)
-		}
+		setIcon(blink)
 		blink = !blink
 	}
 
@@ -230,7 +237,7 @@ func pull() {
 	setSyncStatus("Syncing...")
 	if err := syncer.Pull(); err != nil {
 		log.Printf("gitsync pull: %v", err)
-		setSyncStatus("Sync failed: " + shortErr(err))
+		syncFail(err)
 		return
 	}
 	syncOK()
@@ -244,7 +251,7 @@ func push(message string) {
 	setSyncStatus("Syncing...")
 	if err := syncer.CommitAndPush("ezhours: " + message); err != nil {
 		log.Printf("gitsync push: %v", err)
-		setSyncStatus("Sync failed: " + shortErr(err))
+		syncFail(err)
 		return
 	}
 	syncOK()
@@ -263,9 +270,51 @@ func setSyncStatus(text string) {
 }
 
 // syncOK resets the menu entry and records when the last sync succeeded, so a
-// stale folder is visible at a glance.
+// stale folder is visible at a glance. It also clears the warning badge.
 func syncOK() {
 	setSyncStatus("Sync Now (" + time.Now().Format("15:04") + ")")
+	setSyncFailed(false)
+}
+
+// syncFail reports a failed sync in the menu and badges the tray icon, so an
+// unpublished folder is visible without opening the menu at all.
+func syncFail(err error) {
+	setSyncStatus("Sync failed: " + shortErr(err))
+	setSyncFailed(true)
+}
+
+func setSyncFailed(failed bool) {
+	syncMu.Lock()
+	changed := syncFailed != failed
+	syncFailed = failed
+	syncMu.Unlock()
+
+	// While the timer runs the title updater repaints every second anyway;
+	// repaint here so an idle tray picks the change up straight away.
+	if changed {
+		setIcon(timerState.IsRunning())
+	}
+}
+
+// setIcon paints the tray icon for the current state: active adds the recording
+// dot, a failed sync adds the warning badge, and the two combine. Only the bare
+// clock goes out as a template icon -- macOS renders those as a monochrome mask,
+// which would throw away the colour that makes either badge readable.
+func setIcon(active bool) {
+	syncMu.Lock()
+	failed := syncFailed
+	syncMu.Unlock()
+
+	switch {
+	case active && failed:
+		systray.SetIcon(iconActiveFailed)
+	case active:
+		systray.SetIcon(iconActive)
+	case failed:
+		systray.SetIcon(iconNormalFailed)
+	default:
+		systray.SetTemplateIcon(iconNormal, iconNormal)
+	}
 }
 
 // shortErr keeps the menu readable; the full error goes to the log.

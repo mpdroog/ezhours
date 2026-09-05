@@ -30,6 +30,11 @@ pushes right after you save an entry. There is also a *Sync Now* menu item,
 which shows the time of the last successful sync or the reason the last one
 failed.
 
+A failed sync also badges the tray icon with an amber triangle, so an
+unpublished folder is visible without opening the menu; it clears on the next
+successful sync. Nothing is lost either way -- entries are committed locally
+before the push, so a failed sync only delays publishing.
+
 ### Setup
 
 1. Create an empty (private) repository on GitHub.
