@@ -135,7 +135,7 @@ func needsNewDateHeader(filePath string, entryDate time.Time) bool {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		// Date headers are like "31jan", "01feb" - 5 characters
-		if len(line) == 5 && isDateHeader(line) {
+		if len(line) == 5 && IsDateHeader(line) {
 			lastDateHeader = line
 		}
 	}
@@ -144,8 +144,8 @@ func needsNewDateHeader(filePath string, entryDate time.Time) bool {
 	return lastDateHeader != currentDateHeader
 }
 
-// isDateHeader checks if a string looks like a date header (e.g., "31jan")
-func isDateHeader(s string) bool {
+// IsDateHeader checks if a string looks like a date header (e.g., "31jan")
+func IsDateHeader(s string) bool {
 	if len(s) != 5 {
 		return false
 	}
