@@ -71,42 +71,74 @@ func Scale(data []byte, size int) []byte {
 	return buf.Bytes()
 }
 
-// ActiveData returns the clock icon with a red recording dot in the bottom-right corner.
-// The result is computed once and cached.
+// ActiveData returns the clock icon with a red recording dot in the bottom-right
+// corner. The result is computed once and cached.
 func ActiveData() []byte {
-	activeOnce.Do(func() {
-		img, _, err := image.Decode(bytes.NewReader(Data))
-		if err != nil {
-			activeData = Data
-			return
-		}
+	activeOnce.Do(func() { activeData = WithRecordingDot(Data) })
+	return activeData
+}
 
-		bounds := img.Bounds()
-		active := image.NewRGBA(bounds)
-		draw.Draw(active, bounds, img, bounds.Min, draw.Src)
+// WithRecordingDot draws the red recording dot in the bottom-right corner of the
+// given PNG. Call it after Scale and Recolor: the dot is sized to the image it is
+// drawn on, and drawing it last keeps Recolor from painting over it.
+func WithRecordingDot(data []byte) []byte {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return data
+	}
 
-		w, h := bounds.Dx(), bounds.Dy()
-		radius := w / 5
-		if radius < 2 {
-			radius = 2
-		}
-		cx, cy := w-radius-1, h-radius-1
+	bounds := img.Bounds()
+	active := image.NewRGBA(bounds)
+	draw.Draw(active, bounds, img, bounds.Min, draw.Src)
 
-		red := color.RGBA{R: 220, G: 50, B: 50, A: 255}
-		for y := cy - radius; y <= cy+radius; y++ {
-			for x := cx - radius; x <= cx+radius; x++ {
-				if x >= 0 && y >= 0 && x < w && y < h {
-					dx, dy := float64(x-cx), float64(y-cy)
-					if math.Sqrt(dx*dx+dy*dy) <= float64(radius) {
-						active.SetRGBA(x, y, red)
-					}
+	w, h := bounds.Dx(), bounds.Dy()
+	radius := w / 5
+	if radius < 2 {
+		radius = 2
+	}
+	cx, cy := w-radius-1, h-radius-1
+
+	red := color.RGBA{R: 220, G: 50, B: 50, A: 255}
+	for y := cy - radius; y <= cy+radius; y++ {
+		for x := cx - radius; x <= cx+radius; x++ {
+			if x >= 0 && y >= 0 && x < w && y < h {
+				dx, dy := float64(x-cx), float64(y-cy)
+				if math.Sqrt(dx*dx+dy*dy) <= float64(radius) {
+					active.SetRGBA(x, y, red)
 				}
 			}
 		}
+	}
 
-		var buf bytes.Buffer
-		png.Encode(&buf, active)
-		activeData = buf.Bytes()
-	})
-	return activeData
+	var buf bytes.Buffer
+	png.Encode(&buf, active)
+	return buf.Bytes()
+}
+
+// Recolor repaints every pixel of the given PNG in c, keeping the alpha channel
+// as it is. clock.png is a macOS template icon -- a black glyph on transparent --
+// which macOS inverts for a dark menu bar but Linux tray hosts draw as-is, black
+// on a black panel. Recolor is how the Linux side picks a glyph colour that the
+// panel it lands on can actually show.
+//
+// Run it on the already scaled image: Scale interpolates alpha-premultiplied
+// samples, which is exact for a black glyph but would fringe a white one grey.
+func Recolor(data []byte, c color.RGBA) []byte {
+	src, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return data
+	}
+
+	bounds := src.Bounds()
+	dst := image.NewRGBA(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			_, _, _, a := src.At(x, y).RGBA()
+			dst.SetRGBA(x, y, color.RGBA{R: c.R, G: c.G, B: c.B, A: uint8(a >> 8)})
+		}
+	}
+
+	var buf bytes.Buffer
+	png.Encode(&buf, dst)
+	return buf.Bytes()
 }

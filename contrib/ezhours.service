@@ -1,0 +1,70 @@
+# EZHours as a systemd --user service.
+#
+# It has to run as you, in your graphical session: the tray icon is published
+# over the session bus, zenity draws the save dialog on your $DISPLAY, and the
+# sync reads ~/.ezhours.priv and ~/.ssh/known_hosts. A system daemon has none
+# of that.
+#
+# Install (paths below assume the repo is at its Go import path under $HOME):
+#   go build -o ezhours
+#   ln -s $HOME/go/src/github.com/mpdroog/ezhours/contrib/ezhours.service \
+#         $HOME/.config/systemd/user/ezhours.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now ezhours
+#
+# Checked out somewhere else? Replace the two %h paths below.
+#
+# Do NOT enable-linger for this one: without a session there is no tray to
+# live in and no $DISPLAY to draw on. default.target starts when you log in,
+# which is exactly when the app is wanted.
+#
+# On XFCE (and anything else that does not activate graphical-session.target)
+# default.target is the only hook that fires on login. DISPLAY/XAUTHORITY come
+# from the session's dbus-update-activation-environment, so they are already in
+# the user manager's environment by then.
+#
+# The tray icon only appears once the panel's StatusNotifier host is up. If the
+# service wins that race after a reboot the process runs fine but shows no
+# icon; uncomment the ExecStartPre below to let the panel settle first.
+
+[Unit]
+Description=EZHours, a time tracker in the system tray
+Documentation=https://github.com/mpdroog/ezhours
+PartOf=graphical-session.target
+
+[Service]
+Type=exec
+WorkingDirectory=%h/go/src/github.com/mpdroog/ezhours
+#ExecStartPre=/usr/bin/sleep 10
+ExecStart=%h/go/src/github.com/mpdroog/ezhours/ezhours
+SyslogIdentifier=ezhours
+
+# EZHOURS_REMOTE and EZHOURS_KEY_PASSPHRASE go here; the leading - keeps the
+# service startable when the file does not exist.
+EnvironmentFile=-%h/.config/ezhours.env
+
+Restart=on-failure
+RestartSec=5s
+
+# Hardening is deliberately mild: this is a GUI app. It execs zenity, xdotool,
+# xprop and xdg-open, talks X11 over /tmp/.X11-unix (so no PrivateTmp), and GTK
+# writes to ~/.cache and ~/.config. It writes hours/ under WorkingDirectory,
+# so $HOME stays writable too.
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# git over ssh, plus AF_UNIX for X11 and the session bus. AF_NETLINK is what
+# the resolver uses to read the local interface list.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=default.target

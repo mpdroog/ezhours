@@ -77,8 +77,30 @@ was edited on both devices, both descriptions are kept so nothing is lost.
 
 Files that are not `.txt` are not merged; the local version wins.
 
+## Autostart on Linux
+
+`contrib/ezhours.service` runs EZHours as a `systemd --user` service, started at
+login:
+
+```bash
+go build -o ezhours
+ln -s $PWD/contrib/ezhours.service ~/.config/systemd/user/ezhours.service
+systemctl --user daemon-reload
+systemctl --user enable --now ezhours
+```
+
+The unit pins `WorkingDirectory` to the repository, because the hours folder is a
+relative path. `EZHOURS_REMOTE` and `EZHOURS_KEY_PASSPHRASE` are read from
+`~/.config/ezhours.env`. The comments in the unit cover the rest.
+
 ## Platforms
 
 - macOS
 - Windows
 - Linux (tested on Mint)
+
+The tray icon is a macOS template icon: a black glyph that macOS inverts for a
+dark menu bar. Linux tray hosts draw it as handed to them, so on Linux EZHours
+picks the glyph colour itself, from the colour scheme of the GTK theme. If it
+guesses wrong -- a dark theme whose name does not say "dark", say -- set
+`EZHOURS_ICON_COLOR` to `light` or `dark` and restart.

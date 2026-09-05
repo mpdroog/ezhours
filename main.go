@@ -43,10 +43,12 @@ func main() {
 		syncer = nil
 	}
 
-	// On Linux the SNI protocol renders icons larger; scale up so they aren't tiny.
+	// On Linux the SNI protocol renders icons larger, so scale up first; then
+	// recolour, because nothing there honours a template icon and the black glyph
+	// is invisible on the dark panel most desktops default to.
 	if runtime.GOOS == "linux" {
-		iconNormal = icon.Scale(icon.Data, 64)
-		iconActive = icon.Scale(icon.ActiveData(), 64)
+		iconNormal = icon.Recolor(icon.Scale(icon.Data, 64), icon.GlyphColor())
+		iconActive = icon.WithRecordingDot(iconNormal)
 	} else {
 		iconNormal = icon.Data
 		iconActive = icon.ActiveData()
