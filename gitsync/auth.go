@@ -67,7 +67,9 @@ var knownHostsMu sync.Mutex
 func hostKeyCallback() cryptossh.HostKeyCallback {
 	path := filepath.Join(os.Getenv("HOME"), ".ssh", "known_hosts")
 
-	return func(hostname string, remote net.Addr, key cryptossh.PublicKey) error {
+	// The result is named so the deferred close below can report a write that
+	// failed on the way out.
+	return func(hostname string, remote net.Addr, key cryptossh.PublicKey) (err error) {
 		knownHostsMu.Lock()
 		defer knownHostsMu.Unlock()
 
@@ -75,8 +77,13 @@ func hostKeyCallback() cryptossh.HostKeyCallback {
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			return err
 		}
-		if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); err == nil {
-			f.Close()
+		// Create it if it is not there; knownhosts.New fails on a missing file.
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			return err
+		}
+		if err := f.Close(); err != nil {
+			return err
 		}
 
 		db, err := knownhosts.New(path)
@@ -97,13 +104,19 @@ func hostKeyCallback() cryptossh.HostKeyCallback {
 		}
 
 		// Unknown host: record it and continue.
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		out, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer func() {
+			// This handle was written to, so a failed close is the write
+			// failing late: the host would look accepted and not be recorded.
+			if cerr := out.Close(); cerr != nil && err == nil {
+				err = cerr
+			}
+		}()
 		line := knownhosts.Line([]string{knownhosts.Normalize(hostname)}, key)
-		_, err = fmt.Fprintln(f, line)
+		_, err = fmt.Fprintln(out, line)
 		return err
 	}
 }

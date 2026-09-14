@@ -176,7 +176,7 @@ func (s *Syncer) pull() error {
 		return s.setBranch(branch, theirs.Hash)
 	}
 
-	return s.merge(branch, ours, theirs)
+	return s.merge(ours, theirs)
 }
 
 // setBranch points the branch (and the worktree) at hash.
@@ -194,7 +194,7 @@ func (s *Syncer) setBranch(branch string, hash plumbing.Hash) error {
 
 // merge union merges the two sides and records a real merge commit, so the next
 // push is a fast-forward for the remote.
-func (s *Syncer) merge(branch string, ours, theirs *object.Commit) error {
+func (s *Syncer) merge(ours, theirs *object.Commit) error {
 	baseFiles := map[string]string{}
 	if bases, err := ours.MergeBase(theirs); err == nil && len(bases) > 0 {
 		if baseFiles, err = filesOf(bases[0]); err != nil {
@@ -404,7 +404,7 @@ func (s *Syncer) branch() (string, error) {
 		return "", err
 	}
 	if ref.Type() != plumbing.SymbolicReference {
-		return "", fmt.Errorf("hours repo is in detached HEAD state")
+		return "", errors.New("hours repo is in detached HEAD state")
 	}
 	return ref.Target().Short(), nil
 }
