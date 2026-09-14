@@ -1,6 +1,10 @@
+// Command ezhours is a time tracker that lives in the system tray: start it,
+// stop it, say what the time went into, and it appends the entry to a plain
+// text file per project.
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os/exec"
@@ -13,10 +17,15 @@ import (
 	"github.com/mpdroog/ezhours/apptracker"
 	"github.com/mpdroog/ezhours/gitsync"
 	"github.com/mpdroog/ezhours/icon"
+	"github.com/mpdroog/ezhours/session"
 	"github.com/mpdroog/ezhours/storage"
 	"github.com/mpdroog/ezhours/timer"
 	"github.com/mpdroog/ezhours/ui"
 )
+
+// openDirTimeout bounds the file-manager launcher. It only has to live long
+// enough for the file manager to take over from it.
+const openDirTimeout = 30 * time.Second
 
 var (
 	timerState  *timer.Timer
@@ -220,18 +229,36 @@ func updateMenuText(text string) {
 func openHoursDir() {
 	dir, err := storage.GetHoursDir()
 	if err != nil {
+		log.Printf("hours dir: %v", err)
 		return
 	}
+	// The launcher hands the folder to the file manager and exits; it is not
+	// waiting for the person looking at it, so it does not get to hang forever.
+	ctx, cancel := context.WithTimeout(context.Background(), openDirTimeout)
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", dir)
+		cmd = exec.CommandContext(ctx, "open", dir)
 	case "windows":
-		cmd = exec.Command("explorer", dir)
+		cmd = exec.CommandContext(ctx, "explorer", dir)
 	default:
-		cmd = exec.Command("xdg-open", dir)
+		cmd = session.Command(ctx, "xdg-open", dir)
 	}
-	cmd.Start()
+	// The menu entry gives no sign either way, so a file manager that never
+	// opens is only explicable from the log.
+	if err := cmd.Start(); err != nil {
+		cancel()
+		log.Printf("open hours dir: %v", err)
+		return
+	}
+	// Reap it: xdg-open exits as soon as the file manager is up, and a zombie
+	// per click is not much, but this process runs for weeks.
+	go func() {
+		defer cancel()
+		if err := cmd.Wait(); err != nil {
+			log.Printf("open hours dir: %v", err)
+		}
+	}()
 }
 
 // pull brings in remote entries. Failures are reported in the menu and never
