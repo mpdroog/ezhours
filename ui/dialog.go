@@ -1,12 +1,18 @@
+// Package ui is every window ezhours puts on screen, drawn by the desktop's own
+// dialog program rather than a toolkit linked into this process: zenity on
+// Linux, osascript on macOS, PowerShell forms on Windows.
 package ui
 
 import (
+	"errors"
 	"fmt"
+	"log"
 	"os/exec"
 	"runtime"
 	"strings"
 	"time"
 
+	"github.com/mpdroog/ezhours/session"
 	"github.com/mpdroog/ezhours/storage"
 )
 
@@ -19,7 +25,13 @@ type DialogResult struct {
 
 // ShowSaveDialog displays a native OS dialog for saving time entries
 func ShowSaveDialog(startTime, endTime time.Time) DialogResult {
-	projects, _ := storage.GetProjects()
+	// An unreadable hours folder is not fatal -- the dialog still takes a name
+	// typed by hand -- but it is why the list came up empty, and the entry is
+	// about to be written to that same folder.
+	projects, err := storage.GetProjects()
+	if err != nil {
+		log.Printf("list projects: %v", err)
+	}
 
 	duration := endTime.Sub(startTime)
 	hours := int(duration.Hours())
@@ -47,41 +59,93 @@ func showLinuxDialog(projects []string, timeInfo string) DialogResult {
 	args = append(args, projects...)
 	args = append(args, "+ New Project...")
 
-	cmd := exec.Command("zenity", args...)
-	out, err := cmd.Output()
+	out, err := zenity(args...)
 	if err != nil {
 		return DialogResult{Cancelled: true}
 	}
-	project := strings.TrimSpace(string(out))
+	project := strings.TrimSpace(out)
 	if project == "" || project == "+ New Project..." {
 		// Ask for new project name
-		cmd2 := exec.Command("zenity", "--entry",
+		out2, err2 := zenity("--entry",
 			"--title=EZHours - New Project",
 			"--text=Enter new project name:")
-		out2, err2 := cmd2.Output()
 		if err2 != nil {
 			return DialogResult{Cancelled: true}
 		}
-		project = strings.TrimSpace(string(out2))
+		project = strings.TrimSpace(out2)
 		if project == "" {
 			return DialogResult{Cancelled: true}
 		}
 	}
 
 	// Step 2: enter description
-	cmd3 := exec.Command("zenity", "--entry",
+	out3, err3 := zenity("--entry",
 		"--title=EZHours - Description",
-		fmt.Sprintf("--text=What did you work on?\n\n%s", timeInfo))
-	out3, err3 := cmd3.Output()
+		"--text=What did you work on?\n\n"+timeInfo)
 	if err3 != nil {
 		return DialogResult{Cancelled: true}
 	}
 
 	return DialogResult{
 		Project:     project,
-		Description: strings.TrimSpace(string(out3)),
+		Description: strings.TrimSpace(out3),
 		Cancelled:   false,
 	}
+}
+
+// zenity runs one dialog and returns what the user typed or picked.
+//
+// Pressing Cancel is exit status 1 and says nothing on stderr; a zenity that
+// could not open the display exits the same way but explains itself there. That
+// distinction is the whole reason this logs: the entry is about to be dropped,
+// and without a line here nothing was ever drawn on screen to say why.
+func zenity(args ...string) (string, error) {
+	out, err := session.Interactive("", "zenity", args...)
+	if err != nil {
+		if !cancelled(err) {
+			log.Printf("save dialog: %v", err)
+		}
+		return "", err
+	}
+	return out, nil
+}
+
+// cancelled reports whether zenity exited because the user dismissed the dialog.
+//
+// Cancel is exit status 1 -- and so is a zenity that never got a window, which
+// makes the status alone useless. Nor can the two be told apart by the shape of
+// what lands on stderr: a healthy zenity prints GLib warnings about the theme
+// there, and reports "cannot open display" as exactly the same kind of warning.
+// So the failure is matched for by name, and everything else that is not a
+// plain status-1 exit is treated as a failure too, because an entry is about to
+// be dropped and the alternative is losing it quietly.
+func cancelled(err error) bool {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		return false
+	}
+	var cmdErr *session.CmdError
+	if errors.As(err, &cmdErr) && neverAppeared(cmdErr.Stderr) {
+		return false
+	}
+	return true
+}
+
+// neverAppeared reports whether stderr says the dialog was never drawn. These
+// are what GTK says when it cannot reach a display.
+func neverAppeared(stderr string) bool {
+	stderr = strings.ToLower(stderr)
+	for _, marker := range []string{
+		"cannot open display",
+		"failed to open display",
+		"unable to init server",
+		"unable to initialize gtk",
+	} {
+		if strings.Contains(stderr, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func showMacDialog(projects []string, timeInfo string) DialogResult {
@@ -121,13 +185,18 @@ set descriptionText to text returned of (display dialog "What did you work on?" 
 return selectedProject & "|SEPARATOR|" & descriptionText
 `, projectList, timeInfo)
 
-	cmd := exec.Command("osascript", "-e", script)
-	output, err := cmd.Output()
+	output, err := session.Interactive("", "osascript", "-e", script)
 	if err != nil {
+		// osascript reports a dismissed dialog as an error too, as error -128
+		// on stderr; everything else there is a real failure.
+		var cmdErr *session.CmdError
+		if !errors.As(err, &cmdErr) || !strings.Contains(cmdErr.Stderr, "-128") {
+			log.Printf("save dialog: %v", err)
+		}
 		return DialogResult{Cancelled: true}
 	}
 
-	result := strings.TrimSpace(string(output))
+	result := strings.TrimSpace(output)
 	if result == "CANCELLED" || result == "" {
 		return DialogResult{Cancelled: true}
 	}
@@ -228,13 +297,15 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
 }
 `, timeInfo, projectListPS)
 
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
-	output, err := cmd.Output()
+	output, err := session.Interactive("", "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	if err != nil {
+		// The script reports a cancelled dialog on stdout, so reaching here at
+		// all means the dialog never ran.
+		log.Printf("save dialog: %v", err)
 		return DialogResult{Cancelled: true}
 	}
 
-	result := strings.TrimSpace(string(output))
+	result := strings.TrimSpace(output)
 	if result == "CANCELLED" || result == "" {
 		return DialogResult{Cancelled: true}
 	}
