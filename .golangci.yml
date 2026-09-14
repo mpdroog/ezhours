@@ -1,0 +1,20 @@
+# Run with: golangci-lint run ./...
+#
+# Beyond the defaults, the linters here are the ones that catch what this app
+# gets wrong in practice: it shells out to desktop programs and appends to files,
+# so a dropped error is a lost hour and an unbounded exec is a hung tray.
+version: "2"
+
+linters:
+  enable:
+    - errorlint      # errors compared with == instead of errors.Is
+    - gocritic
+    - revive
+    - misspell
+    - unconvert
+    - nilerr         # returning nil after checking a non-nil error
+    - wastedassign
+    - copyloopvar
+    - usetesting
+    - perfsprint
+    - noctx          # exec without a context: see session.probeTimeout
