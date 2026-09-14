@@ -3,10 +3,14 @@
 package icon
 
 import (
+	"errors"
 	"image/color"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/mpdroog/ezhours/session"
 )
 
 // ColorEnv overrides the detected panel colour scheme. Set it to "light" for a
@@ -72,15 +76,22 @@ func byThemeName(name string) color.RGBA {
 	return dark
 }
 
-// run returns the trimmed output of a command, or ok=false when it is missing or
-// fails -- every probe here is a desktop-specific tool that is absent as often as
-// it is present.
+// run returns the trimmed output of a command, or ok=false when it has nothing
+// to say -- every probe here is a desktop-specific tool that is absent as often
+// as it is present, and the next probe is the answer to that.
+//
+// A tool that is missing is therefore not worth reporting; a tool that is
+// installed and still failed is, because it means the probe that should have
+// answered did not, and the icon colour below it is a guess.
 func run(name string, args ...string) (string, bool) {
-	out, err := exec.Command(name, args...).Output()
+	out, err := session.Output(name, args...)
 	if err != nil {
+		if !errors.Is(err, exec.ErrNotFound) {
+			log.Printf("icon: theme probe failed, falling through to the next: %v", err)
+		}
 		return "", false
 	}
-	s := strings.TrimSpace(string(out))
+	s := strings.TrimSpace(out)
 	if s == "" {
 		return "", false
 	}
