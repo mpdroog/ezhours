@@ -52,11 +52,12 @@ func main() {
 		syncer = nil
 	}
 
-	// On Linux the SNI protocol renders icons larger, so scale up first; then
-	// recolour, because nothing there honours a template icon and the black glyph
-	// is invisible on the dark panel most desktops default to.
+	// On Linux the SNI host scales our pixmap to the panel, often 2x on HiDPI, so
+	// draw the glyph large and anti-aliased rather than stretching the 22px PNG;
+	// and in a panel-matched colour, because nothing there honours a template
+	// icon and the black glyph is invisible on the dark panel most desktops use.
 	if runtime.GOOS == "linux" {
-		iconNormal = icon.Recolor(icon.Scale(icon.Data, 64), icon.GlyphColor())
+		iconNormal = icon.Glyph(64, icon.GlyphColor())
 		iconActive = icon.WithRecordingDot(iconNormal)
 	} else {
 		iconNormal = icon.Data
@@ -64,6 +65,11 @@ func main() {
 	}
 	iconNormalFailed = icon.WithWarningBadge(iconNormal)
 	iconActiveFailed = icon.WithWarningBadge(iconActive)
+	if runtime.GOOS == "linux" {
+		for _, p := range []*[]byte{&iconNormal, &iconActive, &iconNormalFailed, &iconActiveFailed} {
+			*p = icon.ForStatusNotifier(*p)
+		}
+	}
 
 	systray.Run(onReady, onExit)
 }

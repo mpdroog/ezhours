@@ -1,17 +1,25 @@
+// Package icon builds every tray image from the one embedded clock: scaled for
+// the desktop it lands on, recoloured for the panel behind it, and badged for
+// what the app is doing.
 package icon
 
 import (
 	"bytes"
+	// embed is imported for its //go:embed directive below, which needs no
+	// identifier of its own.
 	_ "embed"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/png"
-	_ "image/png"
+	"log"
 	"math"
 	"sync"
 )
 
+// Data is the tray icon as it ships: a black clock glyph on transparent, drawn
+// as a macOS template icon. Every other icon in this package is derived from it.
+//
 //go:embed clock.png
 var Data []byte
 
@@ -29,12 +37,12 @@ func Scale(data []byte, size int) []byte {
 	sb := src.Bounds()
 	sw, sh := float64(sb.Dx()), float64(sb.Dy())
 
-	clamp := func(v, max int) int {
+	clamp := func(v, limit int) int {
 		if v < 0 {
 			return 0
 		}
-		if v >= max {
-			return max - 1
+		if v >= limit {
+			return limit - 1
 		}
 		return v
 	}
@@ -66,9 +74,7 @@ func Scale(data []byte, size int) []byte {
 		}
 	}
 
-	var buf bytes.Buffer
-	png.Encode(&buf, dst)
-	return buf.Bytes()
+	return encode(dst, data)
 }
 
 // ActiveData returns the clock icon with a red recording dot in the bottom-right
@@ -87,32 +93,22 @@ func WithRecordingDot(data []byte) []byte {
 		return data
 	}
 
-	bounds := img.Bounds()
-	active := image.NewRGBA(bounds)
-	draw.Draw(active, bounds, img, bounds.Min, draw.Src)
+	active := toNRGBA(img)
 
-	w, h := bounds.Dx(), bounds.Dy()
+	w, h := active.Bounds().Dx(), active.Bounds().Dy()
 	radius := w / 5
 	if radius < 2 {
 		radius = 2
 	}
-	cx, cy := w-radius-1, h-radius-1
+	// Centred on the middle of pixel (w-radius-1, h-radius-1).
+	cx, cy := float64(w-radius)-0.5, float64(h-radius)-0.5
 
-	red := color.RGBA{R: 220, G: 50, B: 50, A: 255}
-	for y := cy - radius; y <= cy+radius; y++ {
-		for x := cx - radius; x <= cx+radius; x++ {
-			if x >= 0 && y >= 0 && x < w && y < h {
-				dx, dy := float64(x-cx), float64(y-cy)
-				if math.Sqrt(dx*dx+dy*dy) <= float64(radius) {
-					active.SetRGBA(x, y, red)
-				}
-			}
-		}
-	}
+	red := color.NRGBA{R: 220, G: 50, B: 50, A: 255}
+	paint(active, red, func(x, y float64) bool {
+		return math.Hypot(x-cx, y-cy) <= float64(radius)
+	})
 
-	var buf bytes.Buffer
-	png.Encode(&buf, active)
-	return buf.Bytes()
+	return encode(active, Data)
 }
 
 // Recolor repaints every pixel of the given PNG in c, keeping the alpha channel
@@ -129,17 +125,39 @@ func Recolor(data []byte, c color.RGBA) []byte {
 		return data
 	}
 
+	// NRGBA, not RGBA: the colour is straight while the alpha varies along the
+	// anti-aliased edge, and an RGBA (premultiplied) pixel with R above A is
+	// invalid -- png.Encode un-premultiplies it into dark specks and fringes.
 	bounds := src.Bounds()
-	dst := image.NewRGBA(bounds)
+	dst := image.NewNRGBA(bounds)
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
 			_, _, _, a := src.At(x, y).RGBA()
-			dst.SetRGBA(x, y, color.RGBA{R: c.R, G: c.G, B: c.B, A: uint8(a >> 8)})
+			dst.SetNRGBA(x, y, color.NRGBA{R: c.R, G: c.G, B: c.B, A: uint8(a >> 8)})
 		}
 	}
 
+	return encode(dst, data)
+}
+
+// toNRGBA copies img into a straight-alpha image that paint can draw on.
+func toNRGBA(img image.Image) *image.NRGBA {
+	b := img.Bounds()
+	dst := image.NewNRGBA(b)
+	draw.Draw(dst, b, img, b.Min, draw.Src)
+	return dst
+}
+
+// encode renders an image back to PNG bytes, falling back to the icon it was
+// derived from if that somehow fails -- the same thing this package does with an
+// image it cannot decode. A tray needs some icon, and the untransformed one is
+// wrong in colour at worst; nothing at all is a blank space in the panel.
+func encode(img image.Image, fallback []byte) []byte {
 	var buf bytes.Buffer
-	png.Encode(&buf, dst)
+	if err := png.Encode(&buf, img); err != nil {
+		log.Printf("icon: encode: %v", err)
+		return fallback
+	}
 	return buf.Bytes()
 }
 
@@ -154,31 +172,23 @@ func WithWarningBadge(data []byte) []byte {
 		return data
 	}
 
-	bounds := img.Bounds()
-	badged := image.NewRGBA(bounds)
-	draw.Draw(badged, bounds, img, bounds.Min, draw.Src)
+	badged := toNRGBA(img)
 
-	w, h := bounds.Dx(), bounds.Dy()
+	w := badged.Bounds().Dx()
 	size := w * 45 / 100
 	if size < 5 {
 		size = 5
 	}
 	// Top-right corner, one pixel clear of the edge.
-	left, top := w-size-1, 1
-	cx := float64(left) + float64(size)/2
+	left, top := float64(w-size-1), 1.0
+	cx := left + float64(size)/2
 
-	amber := color.RGBA{R: 245, G: 158, B: 11, A: 255}
-	for y := top; y <= top+size && y < h; y++ {
+	amber := color.NRGBA{R: 245, G: 158, B: 11, A: 255}
+	paint(badged, amber, func(x, y float64) bool {
 		// The triangle widens from a point at the top to a full base.
-		half := float64(y-top) / float64(size) * float64(size) / 2
-		for x := int(cx - half); x <= int(cx+half); x++ {
-			if x >= 0 && x < w && y >= 0 {
-				badged.SetRGBA(x, y, amber)
-			}
-		}
-	}
+		dy := y - top
+		return dy >= 0 && dy <= float64(size) && math.Abs(x-cx) <= dy/2
+	})
 
-	var buf bytes.Buffer
-	png.Encode(&buf, badged)
-	return buf.Bytes()
+	return encode(badged, data)
 }
