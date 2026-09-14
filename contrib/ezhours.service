@@ -19,13 +19,23 @@
 # which is exactly when the app is wanted.
 #
 # On XFCE (and anything else that does not activate graphical-session.target)
-# default.target is the only hook that fires on login. DISPLAY/XAUTHORITY come
-# from the session's dbus-update-activation-environment, so they are already in
-# the user manager's environment by then.
+# default.target is the only hook that fires on login -- but it fires before the
+# session has run dbus-update-activation-environment, so at that moment the user
+# manager has no DISPLAY or XAUTHORITY to hand down, and a service keeps the
+# environment it was forked with. What that costs is invisible: the tray is
+# D-Bus, so the icon appears as usual, while zenity, xdg-open and xdotool all
+# exit with "cannot open display" -- no save dialog, no file manager, no app
+# tracking.
 #
-# The tray icon only appears once the panel's StatusNotifier host is up. If the
-# service wins that race after a reboot the process runs fine but shows no
-# icon; uncomment the ExecStartPre below to let the panel settle first.
+# So wait for it. systemd reads the manager environment again for every command
+# it spawns, so ExecStart inherits what ExecStartPre waited for. The wait also
+# lets the panel's StatusNotifier host come up, which the tray needs to register
+# with at all.
+#
+# The app repairs this itself if it starts before the session anyway (see
+# session/env_linux.go); the wait is what makes app tracking right from the
+# first poll, and it gives up after 30s so a session that publishes neither
+# variable only costs half a minute.
 
 [Unit]
 Description=EZHours, a time tracker in the system tray
@@ -35,7 +45,7 @@ PartOf=graphical-session.target
 [Service]
 Type=exec
 WorkingDirectory=%h/go/src/github.com/mpdroog/ezhours
-#ExecStartPre=/usr/bin/sleep 10
+ExecStartPre=-/usr/bin/timeout 30 /bin/sh -c 'until systemctl --user show-environment | grep -qE "^(DISPLAY|WAYLAND_DISPLAY)="; do sleep 1; done'
 ExecStart=%h/go/src/github.com/mpdroog/ezhours/ezhours
 SyslogIdentifier=ezhours
 
