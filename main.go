@@ -153,6 +153,13 @@ func onTrayClicked() {
 			if !result.Cancelled && result.Project != "" {
 				if err := storage.SaveEntry(result.Project, timerState.StartTime(), timerState.EndTime(), result.Description, appUsage); err != nil {
 					log.Printf("save entry: %v", err)
+					// The timer is about to be reset, so this dialog is the only
+					// remaining copy of the hour: it shows the entry as text the
+					// user can copy into the file by hand.
+					ui.ShowSaveError(
+						storage.ProjectPath(result.Project),
+						storage.EntryText(timerState.StartTime(), timerState.EndTime(), result.Description, appUsage),
+						err)
 				} else {
 					saved = fmt.Sprintf("%s: %s - %s",
 						result.Project,
