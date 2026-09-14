@@ -1,17 +1,19 @@
 package apptracker
 
 import (
-	"os/exec"
 	"strings"
+
+	"github.com/mpdroog/ezhours/session"
 )
 
-// getActiveApp returns the name of the currently active application on macOS
-func getActiveApp() string {
+// getActiveApp returns the name of the currently active application on macOS.
+// The error is the caller's to log: without Accessibility permission this fails
+// every time, and silence there looks exactly like an idle machine.
+func getActiveApp() (string, error) {
 	script := `tell application "System Events" to get name of first process whose frontmost is true`
-	cmd := exec.Command("osascript", "-e", script)
-	output, err := cmd.Output()
+	out, err := session.Output("osascript", "-e", script)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return strings.TrimSpace(string(output))
+	return strings.TrimSpace(out), nil
 }

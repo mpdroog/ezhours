@@ -1,7 +1,10 @@
+// Package apptracker records which applications were focused while the timer
+// ran, so a session summary says what the time went into.
 package apptracker
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -125,12 +128,42 @@ func Summarize(appTime map[string]time.Duration) []AppUsage {
 	return top
 }
 
+// probeLog reports what the active-window probe says, without saying it twice.
+//
+// The probe runs every couple of seconds, so a display it cannot reach -- the
+// usual cause, and one that lasts for the whole session -- would otherwise
+// repeat one sentence tens of thousands of times a day and bury the rest of the
+// log. Each distinct failure is reported once, and so is the recovery, which is
+// what tells you whether the gap in a session summary was real idle time or a
+// tracker that was blind.
+type probeLog struct {
+	last string
+}
+
+func (p *probeLog) report(err error) {
+	if err == nil {
+		if p.last != "" {
+			log.Printf("apptracker: active window readable again")
+			p.last = ""
+		}
+		return
+	}
+	if msg := err.Error(); msg != p.last {
+		p.last = msg
+		log.Printf("apptracker: cannot read the active window, app usage will be incomplete: %v", err)
+	}
+}
+
 func (t *Tracker) poll() {
 	ticker := time.NewTicker(t.pollInterval)
 	defer ticker.Stop()
 
+	var probe probeLog
+
 	// Get initial app
-	if app := getActiveApp(); app != "" {
+	app, err := getActiveApp()
+	probe.report(err)
+	if app != "" {
 		t.mu.Lock()
 		t.lastApp = app
 		t.lastSwitchAt = time.Now()
@@ -140,7 +173,8 @@ func (t *Tracker) poll() {
 	for {
 		select {
 		case <-ticker.C:
-			app := getActiveApp()
+			app, err = getActiveApp()
+			probe.report(err)
 			if app == "" {
 				continue
 			}

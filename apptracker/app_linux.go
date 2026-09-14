@@ -1,9 +1,11 @@
 package apptracker
 
 import (
-	"os/exec"
+	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/mpdroog/ezhours/session"
 )
 
 // wmClassRe matches the quoted values of `xprop WM_CLASS`, which reports
@@ -14,38 +16,48 @@ var wmClassRe = regexp.MustCompile(`"([^"]*)"`)
 // The window class is preferred over the title, because titles change per
 // browser tab, per shell command and even per spinner frame, which would
 // fragment a single app into dozens of entries.
-func getActiveApp() string {
-	out, err := exec.Command("xdotool", "getactivewindow").Output()
+//
+// An empty name with no error means there is nothing to report right now -- no
+// window is focused, or the one that is names itself nothing. A tracker that
+// cannot see the display at all is an error, and the caller logs it.
+func getActiveApp() (string, error) {
+	out, err := session.Output("xdotool", "getactivewindow")
 	if err != nil {
-		return ""
+		return "", err
 	}
-	win := strings.TrimSpace(string(out))
+	win := strings.TrimSpace(out)
 	if win == "" {
-		return ""
+		return "", nil
 	}
 
-	if class := windowClass(win); class != "" {
-		return prettify(class)
+	class, err := windowClass(win)
+	if err != nil {
+		return "", err
+	}
+	if class != "" {
+		return prettify(class), nil
 	}
 
 	// Fall back to the title for windows that expose no class.
-	out, err = exec.Command("xdotool", "getwindowname", win).Output()
+	out, err = session.Output("xdotool", "getwindowname", win)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return titleToApp(string(out))
+	return titleToApp(out), nil
 }
 
-// windowClass returns the WM_CLASS class of a window, or "" if unavailable.
-func windowClass(win string) string {
-	out, err := exec.Command("xprop", "-id", win, "WM_CLASS").Output()
+// windowClass returns the WM_CLASS class of a window. A window that carries no
+// class is "" with no error: plenty do not, which is what the title fallback
+// above is for.
+func windowClass(win string) (string, error) {
+	out, err := session.Output("xprop", "-id", win, "WM_CLASS")
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("window %s: %w", win, err)
 	}
-	m := wmClassRe.FindAllStringSubmatch(string(out), -1)
+	m := wmClassRe.FindAllStringSubmatch(out, -1)
 	if len(m) == 0 {
-		return ""
+		return "", nil
 	}
 	// Last value is the class ("firefox"); the first is the instance.
-	return normalize(m[len(m)-1][1])
+	return normalize(m[len(m)-1][1]), nil
 }

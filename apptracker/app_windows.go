@@ -1,12 +1,13 @@
 package apptracker
 
 import (
-	"os/exec"
 	"strings"
+
+	"github.com/mpdroog/ezhours/session"
 )
 
-// getActiveApp returns the name of the currently active application on Windows
-func getActiveApp() string {
+// getActiveApp returns the name of the currently active application on Windows.
+func getActiveApp() (string, error) {
 	script := `Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -23,10 +24,9 @@ $pid = 0
 [Win32]::GetWindowThreadProcessId($hwnd, [ref]$pid) | Out-Null
 (Get-Process -Id $pid -ErrorAction SilentlyContinue).ProcessName`
 
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
-	output, err := cmd.Output()
+	out, err := session.Output("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return strings.TrimSpace(string(output))
+	return strings.TrimSpace(out), nil
 }
