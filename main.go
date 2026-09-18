@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -275,8 +276,11 @@ func openHoursDir() {
 
 // pull brings in remote entries. Failures are reported in the menu and never
 // block the timer: worst case this device works offline and syncs later.
+var errSyncerNil = errors.New("sync disabled: hours directory not initialized")
+
 func pull() {
 	if syncer == nil {
+		syncFail(errSyncerNil)
 		return
 	}
 	setSyncStatus("Syncing...")
@@ -291,6 +295,7 @@ func pull() {
 // push commits the hours folder and publishes it under the given message.
 func push(message string) {
 	if syncer == nil {
+		syncFail(errSyncerNil)
 		return
 	}
 	setSyncStatus("Syncing...")

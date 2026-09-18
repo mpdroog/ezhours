@@ -30,6 +30,9 @@ const RemoteEnv = "EZHOURS_REMOTE"
 
 const remoteName = "origin"
 
+// ErrSyncDisabled is returned when no remote is configured.
+var ErrSyncDisabled = errors.New("sync disabled: no remote configured (set EZHOURS_REMOTE or add origin)")
+
 // Syncer owns the hours repository. All operations are serialised: a pull
 // triggered by starting the timer must not overlap the push of the previous
 // entry.
@@ -105,7 +108,7 @@ func (s *Syncer) Pull() error {
 
 func (s *Syncer) pull() error {
 	if !s.Enabled() {
-		return nil
+		return ErrSyncDisabled
 	}
 	auth, err := s.auth()
 	if err != nil {
@@ -316,7 +319,7 @@ func (s *Syncer) CommitAndPush(message string) error {
 		return err
 	}
 	if !s.Enabled() {
-		return nil
+		return ErrSyncDisabled
 	}
 
 	err := s.push()
