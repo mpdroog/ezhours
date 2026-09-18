@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"runtime"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	"github.com/mpdroog/ezhours/apptracker"
 	"github.com/mpdroog/ezhours/gitsync"
 	"github.com/mpdroog/ezhours/icon"
+	"github.com/mpdroog/ezhours/invoiced"
 	"github.com/mpdroog/ezhours/session"
 	"github.com/mpdroog/ezhours/storage"
 	"github.com/mpdroog/ezhours/timer"
@@ -93,6 +95,7 @@ func onReady() {
 	systray.AddSeparator()
 	mOpenDir := systray.AddMenuItem("Open Hours Folder", "Open the hours folder in file manager")
 	mSync = systray.AddMenuItem("Sync Now", "Pull and push the hours folder")
+	mExport := systray.AddMenuItem("Export to InvoiceD", "Export hours to InvoiceD")
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit", "Exit EZHours")
 
@@ -114,6 +117,8 @@ func onReady() {
 				openHoursDir()
 			case <-mSync.ClickedCh:
 				go syncNow()
+			case <-mExport.ClickedCh:
+				exportToInvoiced()
 			case <-mQuit.ClickedCh:
 				systray.Quit()
 			}
@@ -364,4 +369,56 @@ func shortErr(err error) string {
 		msg = msg[:57] + "..."
 	}
 	return msg
+}
+
+func exportToInvoiced() {
+	// Get hours directory
+	dir, err := storage.GetHoursDir()
+	if err != nil {
+		fmt.Printf("Error getting hours dir: %v\n", err)
+		return
+	}
+
+	// Create client with default config
+	config := invoiced.DefaultConfig()
+	client := invoiced.NewClient(config)
+
+	// Parse all hours files
+	hours, err := invoiced.ParseAllHoursFiles(dir, config.Year)
+	if err != nil {
+		fmt.Printf("Error parsing hours files: %v\n", err)
+		return
+	}
+
+	if len(hours) == 0 {
+		fmt.Println("No hours to export")
+		return
+	}
+
+	// Export to InvoiceD and truncate files on success
+	for _, hour := range hours {
+		if err := client.ExportHour(hour); err != nil {
+			fmt.Printf("Error exporting %s: %v\n", hour.Name, err)
+			return
+		}
+		// Truncate file after successful export
+		if err := os.Truncate(hour.FilePath, 0); err != nil {
+			fmt.Printf("Error truncating %s: %v\n", hour.FilePath, err)
+		}
+	}
+
+	fmt.Printf("Exported %d hour files to InvoiceD\n", len(hours))
+
+	// Open browser to hours page
+	url := fmt.Sprintf("%s/static/#%s/%d/hours", client.GetBaseURL(), client.GetEntity(), client.GetYear())
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	cmd.Start()
 }
