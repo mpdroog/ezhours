@@ -50,6 +50,13 @@ var (
 	// title updater repaints the icon every second.
 	syncMu     sync.Mutex
 	syncFailed bool
+
+	// iconMu guards what setIcon last put in the tray, so that repeated
+	// calls with the same state cost nothing.
+	iconMu        sync.Mutex
+	iconSet       bool
+	iconActiveNow bool
+	iconFailedNow bool
 )
 
 func main() {
@@ -205,15 +212,19 @@ func updateTitle() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	blink := false
 	update := func() {
 		elapsed := timer.FormatDuration(timerState.Elapsed())
 		systray.SetTitle(elapsed)
 		systray.SetTooltip("EZHours - Recording: " + elapsed)
 		updateMenuText("Stop Timer (" + elapsed + ")")
-		// Blink between normal and active icon each second
-		setIcon(blink)
-		blink = !blink
+		// Steady, not blinking. The blink alternated the icon once a
+		// second, and every frame of it was a NewIcon on the session bus
+		// that made the tray host re-read this item and repaint its whole
+		// bar -- measured at ~3% of a core in the bar and as much again in
+		// the compositor, on an idle desktop, for an animation nobody
+		// asked for. setIcon is a no-op unless the picture really changes,
+		// so calling it per tick still picks up a sync failure at once.
+		setIcon(true)
 	}
 
 	// Initial update
@@ -354,6 +365,17 @@ func setIcon(active bool) {
 	syncMu.Lock()
 	failed := syncFailed
 	syncMu.Unlock()
+
+	// Pushing an icon is not free: it serialises the pixels onto the
+	// session bus and every tray host watching has to re-read this item.
+	// Callers repaint on a timer, so drop the writes that change nothing.
+	iconMu.Lock()
+	if iconSet && iconActiveNow == active && iconFailedNow == failed {
+		iconMu.Unlock()
+		return
+	}
+	iconSet, iconActiveNow, iconFailedNow = true, active, failed
+	iconMu.Unlock()
 
 	switch {
 	case active && failed:
