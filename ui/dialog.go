@@ -61,53 +61,36 @@ func ShowSaveDialog(startTime, endTime time.Time) DialogResult {
 }
 
 func showLinuxDialog(projects []string, timeInfo string) DialogResult {
-	// Step 1: pick or enter a project via zenity
-	args := []string{"--list", "--title=EZHours - Save Entry",
-		"--text=Select project for:\n" + timeInfo,
-		"--column=Project", "--editable"}
-	args = append(args, projects...)
-	args = append(args, "+ New Project...")
-
-	out, err := zenity(args...)
+	// One dialog, not two. zenity had no way to offer "a project not on
+	// this list" except a magic "+ New Project..." row that then opened a
+	// second box; ask puts an "Add ..." row above the matches as soon as
+	// what you type is not one of them, so naming a new project and
+	// picking an existing one are the same gesture.
+	project, err := ask(strings.Join(projects, "\n"),
+		"-mode=list", "-editable",
+		"-title=EZHours \u2014 save this hour",
+		"-text=Which project is this for?\n"+timeInfo)
 	if err != nil {
 		return dialogFailure(err)
 	}
-	project := strings.TrimSpace(out)
-	if project == "" || project == "+ New Project..." {
-		// Ask for new project name
-		out2, err2 := zenity("--entry",
-			"--title=EZHours - New Project",
-			"--text=Enter new project name:")
-		if err2 != nil {
-			return dialogFailure(err2)
-		}
-		project = strings.TrimSpace(out2)
-		if project == "" {
-			return DialogResult{Cancelled: true}
-		}
+	if project == "" {
+		return DialogResult{Cancelled: true}
 	}
 
-	// Step 2: enter description
-	out3, err3 := zenity("--entry",
-		"--title=EZHours - Description",
-		"--text=What did you work on?\n\n"+timeInfo)
-	if err3 != nil {
-		return dialogFailure(err3)
+	// The description is genuinely optional, so a blank one is an answer
+	// rather than a dismissal -- otherwise Enter on an empty box would
+	// throw the hour away.
+	description, err := ask("",
+		"-mode=entry", "-allow-empty",
+		"-title=EZHours \u2014 "+project,
+		"-text=What did you work on?\n"+timeInfo)
+	if err != nil {
+		return dialogFailure(err)
 	}
 
-	return DialogResult{
-		Project:     project,
-		Description: strings.TrimSpace(out3),
-		Cancelled:   false,
-	}
+	return DialogResult{Project: project, Description: description}
 }
 
-// zenity runs one dialog and returns what the user typed or picked.
-//
-// Pressing Cancel is exit status 1 and says nothing on stderr; a zenity that
-// could not open the display exits the same way but explains itself there. That
-// distinction is the whole reason this logs: the entry is about to be dropped,
-// and without a line here nothing was ever drawn on screen to say why.
 // dialogFailure turns one dialog's error into a result: a Cancel when the
 // user dismissed it, and otherwise a failure the caller must not treat as
 // one.
@@ -118,18 +101,33 @@ func dialogFailure(err error) DialogResult {
 	return DialogResult{Failed: err}
 }
 
-func zenity(args ...string) (string, error) {
-	out, err := session.Interactive("", "zenity", args...)
+// askBin is osxflow's own dialog, which replaces zenity.
+//
+// zenity is not installed on this machine and never was, so every Stop
+// Timer looked exactly like a Cancel and the hour went in the bin. ask is
+// built from the pieces osxflow already had -- a window, a font, a list
+// and a text field -- and ships as one static binary beside the rest of
+// the desktop's tools.
+//
+// Its exit status is the contract: 0 accepted, 1 dismissed, 2 could not
+// show a dialog at all. cancelled below turns that into the distinction
+// the caller needs, and 2 is what stops a missing dialog from ever again
+// being read as a decision to discard.
+const askBin = "ask"
+
+// ask runs one dialog and returns what came back.
+func ask(stdin string, args ...string) (string, error) {
+	out, err := session.Interactive(stdin, askBin, args...)
 	if err != nil {
 		if !cancelled(err) {
 			log.Printf("save dialog: %v", err)
 		}
 		return "", err
 	}
-	return out, nil
+	return strings.TrimSpace(out), nil
 }
 
-// cancelled reports whether zenity exited because the user dismissed the dialog.
+// cancelled reports whether the dialog exited because the user dismissed it.
 //
 // Cancel is exit status 1 -- and so is a zenity that never got a window, which
 // makes the status alone useless. Nor can the two be told apart by the shape of

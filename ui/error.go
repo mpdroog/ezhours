@@ -49,13 +49,12 @@ func saveErrorText(path, entry string, saveErr error) string {
 	return b.String()
 }
 
-// showLinuxError uses --text-info, which is a real text view: its content can be
-// selected and copied, which --error (a label) cannot.
+// showLinuxError shows the entry as text the user can read back and retype.
+// It is the last copy of the hour, so it goes through the same dialog as
+// everything else rather than a notification that scrolls away.
 func showLinuxError(body string) error {
-	_, err := session.Interactive(body, "zenity", "--text-info",
-		"--title=EZHours - Entry not saved",
-		"--width=620", "--height=460",
-		"--ok-label=Close")
+	_, err := session.Interactive(body, askBin, "-mode=message",
+		"-title=EZHours \u2014 entry not saved")
 	return err
 }
 
