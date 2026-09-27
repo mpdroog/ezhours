@@ -138,6 +138,12 @@ func onExit() {
 	// Cleanup
 }
 
+// unfiledProject is where an hour goes when the dialog could not ask which
+// project it belongs to. A real project name never has to be guessed, so a
+// file by this name in the hours folder means exactly one thing: go and sort
+// these by hand.
+const unfiledProject = "UNFILED"
+
 func onTrayClicked() {
 	if dialogOpen {
 		return
@@ -162,20 +168,31 @@ func onTrayClicked() {
 		go func() {
 			result := ui.ShowSaveDialog(timerState.StartTime(), timerState.EndTime())
 
+			// The dialog never opened: zenity missing, no display, and so
+			// on. Nobody chose to throw this hour away, so do not throw it
+			// away -- write it under a name that is plainly waiting to be
+			// sorted, and say in the entry itself why it has no project.
+			project, description := result.Project, result.Description
+			if result.Failed != nil {
+				project = unfiledProject
+				description = "unfiled -- the save dialog could not run: " + shortErr(result.Failed)
+				log.Printf("save dialog unavailable; filing the entry under %q instead", project)
+			}
+
 			saved := ""
-			if !result.Cancelled && result.Project != "" {
-				if err := storage.SaveEntry(result.Project, timerState.StartTime(), timerState.EndTime(), result.Description, appUsage); err != nil {
+			if !result.Cancelled && project != "" {
+				if err := storage.SaveEntry(project, timerState.StartTime(), timerState.EndTime(), description, appUsage); err != nil {
 					log.Printf("save entry: %v", err)
 					// The timer is about to be reset, so this dialog is the only
 					// remaining copy of the hour: it shows the entry as text the
 					// user can copy into the file by hand.
 					ui.ShowSaveError(
-						storage.ProjectPath(result.Project),
-						storage.EntryText(timerState.StartTime(), timerState.EndTime(), result.Description, appUsage),
+						storage.ProjectPath(project),
+						storage.EntryText(timerState.StartTime(), timerState.EndTime(), description, appUsage),
 						err)
 				} else {
 					saved = fmt.Sprintf("%s: %s - %s",
-						result.Project,
+						project,
 						timerState.StartTime().Format("2006-01-02 15:04"),
 						timerState.EndTime().Format("15:04"))
 				}

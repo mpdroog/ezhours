@@ -21,6 +21,15 @@ type DialogResult struct {
 	Project     string
 	Description string
 	Cancelled   bool
+
+	// Failed is why the dialog never reached the screen, when it did not.
+	//
+	// Cancelled stays false then, and the two must not be conflated: Cancel
+	// is the user deciding to drop the hour, and this is nobody deciding
+	// anything. Every error path here used to report Cancelled, so on a box
+	// with no zenity installed every single stop looked like a deliberate
+	// discard and the entry went in the bin without a word on screen.
+	Failed error
 }
 
 // ShowSaveDialog displays a native OS dialog for saving time entries
@@ -61,7 +70,7 @@ func showLinuxDialog(projects []string, timeInfo string) DialogResult {
 
 	out, err := zenity(args...)
 	if err != nil {
-		return DialogResult{Cancelled: true}
+		return dialogFailure(err)
 	}
 	project := strings.TrimSpace(out)
 	if project == "" || project == "+ New Project..." {
@@ -70,7 +79,7 @@ func showLinuxDialog(projects []string, timeInfo string) DialogResult {
 			"--title=EZHours - New Project",
 			"--text=Enter new project name:")
 		if err2 != nil {
-			return DialogResult{Cancelled: true}
+			return dialogFailure(err2)
 		}
 		project = strings.TrimSpace(out2)
 		if project == "" {
@@ -83,7 +92,7 @@ func showLinuxDialog(projects []string, timeInfo string) DialogResult {
 		"--title=EZHours - Description",
 		"--text=What did you work on?\n\n"+timeInfo)
 	if err3 != nil {
-		return DialogResult{Cancelled: true}
+		return dialogFailure(err3)
 	}
 
 	return DialogResult{
@@ -99,6 +108,16 @@ func showLinuxDialog(projects []string, timeInfo string) DialogResult {
 // could not open the display exits the same way but explains itself there. That
 // distinction is the whole reason this logs: the entry is about to be dropped,
 // and without a line here nothing was ever drawn on screen to say why.
+// dialogFailure turns one dialog's error into a result: a Cancel when the
+// user dismissed it, and otherwise a failure the caller must not treat as
+// one.
+func dialogFailure(err error) DialogResult {
+	if cancelled(err) {
+		return DialogResult{Cancelled: true}
+	}
+	return DialogResult{Failed: err}
+}
+
 func zenity(args ...string) (string, error) {
 	out, err := session.Interactive("", "zenity", args...)
 	if err != nil {
