@@ -238,7 +238,7 @@ func run(onReady func()) error {
 
 		case c := <-item.Clicks():
 			switch c.Kind {
-			case sni.Activate, sni.ContextMenu, sni.SecondaryActivate:
+			case sni.Activate, sni.ContextMenu:
 				openMenu(host, c)
 			}
 
@@ -260,8 +260,23 @@ func run(onReady func()) error {
 	}
 }
 
-// openMenu draws the menu under the icon.
+// openMenu draws the menu under the icon, or puts it away when it is
+// already showing.
+//
+// The second click has to close it. The menu takes the pointer grab, so
+// the click that dismisses it never reaches the icon underneath -- it
+// arrives here as another Activate, and reopening on it made the menu look
+// like it could not be dismissed by the thing that opened it.
 func openMenu(host *menu.Host, c sni.Click) {
+	if host.IsOpen() {
+		host.Close()
+		return
+	}
+	// Where the tray says the icon is, for placing the menu when the
+	// compositor publishes no work area -- which labwc does not, having no
+	// way to describe a layer-shell panel in EWMH terms.
+	host.AnchorY = c.Y
+
 	state.mu.Lock()
 	items := make([]*MenuItem, len(state.items))
 	copy(items, state.items)
