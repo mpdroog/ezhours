@@ -14,8 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"fyne.io/systray"
-
 	"github.com/mpdroog/ezhours/apptracker"
 	"github.com/mpdroog/ezhours/gitsync"
 	"github.com/mpdroog/ezhours/icon"
@@ -23,6 +21,7 @@ import (
 	"github.com/mpdroog/ezhours/session"
 	"github.com/mpdroog/ezhours/storage"
 	"github.com/mpdroog/ezhours/timer"
+	"github.com/mpdroog/ezhours/tray"
 	"github.com/mpdroog/ezhours/ui"
 )
 
@@ -35,8 +34,8 @@ var (
 	appTracker  *apptracker.Tracker
 	stopUpdater chan struct{}
 	dialogOpen  bool
-	mToggle     *systray.MenuItem
-	mSync       *systray.MenuItem
+	mToggle     *tray.MenuItem
+	mSync       *tray.MenuItem
 
 	syncer *gitsync.Syncer
 
@@ -90,27 +89,27 @@ func main() {
 		}
 	}
 
-	systray.Run(onReady, onExit)
+	tray.Run(onReady, onExit)
 }
 
 func onReady() {
 	// Use template icon - macOS will automatically handle light/dark mode
 	setIcon(false)
-	systray.SetTooltip("EZHours - Click to start/stop timer")
+	tray.SetTooltip("EZHours - Click to start/stop timer")
 
 	// Menu items
-	mToggle = systray.AddMenuItem("Start Timer", "Start tracking time")
-	systray.AddSeparator()
-	mOpenDir := systray.AddMenuItem("Open Hours Folder", "Open the hours folder in file manager")
-	mSync = systray.AddMenuItem("Sync Now", "Pull and push the hours folder")
-	mExport := systray.AddMenuItem("Export to InvoiceD", "Export hours to InvoiceD")
-	systray.AddSeparator()
-	mQuit := systray.AddMenuItem("Quit", "Exit EZHours")
+	mToggle = tray.AddMenuItem("Start Timer", "Start tracking time")
+	tray.AddSeparator()
+	mOpenDir := tray.AddMenuItem("Open Hours Folder", "Open the hours folder in file manager")
+	mSync = tray.AddMenuItem("Sync Now", "Pull and push the hours folder")
+	mExport := tray.AddMenuItem("Export to InvoiceD", "Export hours to InvoiceD")
+	tray.AddSeparator()
+	mQuit := tray.AddMenuItem("Quit", "Exit EZHours")
 
 	// On macOS/Windows left-click toggles the timer directly.
 	// On Linux, skip SetOnTapped so ItemIsMenu=true and left-click opens the menu instead.
 	if runtime.GOOS != "linux" {
-		systray.SetOnTapped(onTrayClicked)
+		tray.SetOnTapped(onTrayClicked)
 	}
 
 	// Pick up entries other devices pushed while this one was closed.
@@ -119,16 +118,16 @@ func onReady() {
 	go func() {
 		for {
 			select {
-			case <-mToggle.ClickedCh:
+			case <-mToggle.Clicked():
 				onTrayClicked()
-			case <-mOpenDir.ClickedCh:
+			case <-mOpenDir.Clicked():
 				openHoursDir()
-			case <-mSync.ClickedCh:
+			case <-mSync.Clicked():
 				go syncNow()
-			case <-mExport.ClickedCh:
+			case <-mExport.Clicked():
 				exportToInvoiced()
-			case <-mQuit.ClickedCh:
-				systray.Quit()
+			case <-mQuit.Clicked():
+				tray.Quit()
 			}
 		}
 	}()
@@ -198,8 +197,8 @@ func onTrayClicked() {
 				}
 			}
 
-			systray.SetTitle("")
-			systray.SetTooltip("EZHours - Click to start/stop timer")
+			tray.SetTitle("")
+			tray.SetTooltip("EZHours - Click to start/stop timer")
 			setIcon(false)
 			updateMenuText("Start Timer")
 			dialogOpen = false
@@ -231,8 +230,8 @@ func updateTitle() {
 
 	update := func() {
 		elapsed := timer.FormatDuration(timerState.Elapsed())
-		systray.SetTitle(elapsed)
-		systray.SetTooltip("EZHours - Recording: " + elapsed)
+		tray.SetTitle(elapsed)
+		tray.SetTooltip("EZHours - Recording: " + elapsed)
 		updateMenuText("Stop Timer (" + elapsed + ")")
 		// Steady, not blinking. The blink alternated the icon once a
 		// second, and every frame of it was a NewIcon on the session bus
@@ -396,13 +395,13 @@ func setIcon(active bool) {
 
 	switch {
 	case active && failed:
-		systray.SetIcon(iconActiveFailed)
+		tray.SetIcon(iconActiveFailed)
 	case active:
-		systray.SetIcon(iconActive)
+		tray.SetIcon(iconActive)
 	case failed:
-		systray.SetIcon(iconNormalFailed)
+		tray.SetIcon(iconNormalFailed)
 	default:
-		systray.SetTemplateIcon(iconNormal, iconNormal)
+		tray.SetTemplateIcon(iconNormal, iconNormal)
 	}
 }
 

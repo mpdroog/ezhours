@@ -2,7 +2,16 @@ module github.com/mpdroog/ezhours
 
 go 1.26.0
 
-require fyne.io/systray v1.12.0
+require (
+	fyne.io/systray v1.12.0
+	github.com/jezek/xgb v1.3.1
+	github.com/jezek/xgbutil v0.0.0-20260124183602-9fd151d6a51a
+)
+
+require (
+	golang.org/x/image v0.46.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+)
 
 require (
 	dario.cat/mergo v1.0.0 // indirect
@@ -14,7 +23,7 @@ require (
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.0 // indirect
 	github.com/go-git/go-git/v5 v5.19.2
-	github.com/godbus/dbus/v5 v5.1.0 // indirect
+	github.com/godbus/dbus/v5 v5.1.0
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
