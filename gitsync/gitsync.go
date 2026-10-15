@@ -46,19 +46,26 @@ type Syncer struct {
 // yet. It never fails because of a missing remote; use Enabled to check whether
 // there is anything to sync with.
 func New(dir string) (*Syncer, error) {
-	repo, err := git.PlainOpen(dir)
-	if errors.Is(err, git.ErrRepositoryNotExists) {
-		repo, err = git.PlainInit(dir, false)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", dir, err)
-	}
-
-	s := &Syncer{dir: dir, repo: repo}
-	if err := s.ensureRemote(); err != nil {
+	s := &Syncer{dir: dir}
+	if err := s.open(); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+// open (re)reads the repository from disk. go-git caches the pack index of
+// the repo it opened, so a .git that was replaced or re-cloned while ezhours
+// runs would otherwise fail with "object not found" until a restart.
+func (s *Syncer) open() error {
+	repo, err := git.PlainOpen(s.dir)
+	if errors.Is(err, git.ErrRepositoryNotExists) {
+		repo, err = git.PlainInit(s.dir, false)
+	}
+	if err != nil {
+		return fmt.Errorf("open %s: %w", s.dir, err)
+	}
+	s.repo = repo
+	return s.ensureRemote()
 }
 
 // ensureRemote wires up origin from RemoteEnv when the repo has none.
@@ -103,6 +110,9 @@ func (s *Syncer) remoteURL() (string, error) {
 func (s *Syncer) Pull() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.open(); err != nil {
+		return err
+	}
 	return s.pull()
 }
 
@@ -315,6 +325,9 @@ func (s *Syncer) CommitAndPush(message string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := s.open(); err != nil {
+		return err
+	}
 	if err := s.commitLocal(message); err != nil {
 		return err
 	}

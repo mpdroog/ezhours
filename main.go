@@ -272,6 +272,11 @@ func openHoursDir() {
 		log.Printf("hours dir: %v", err)
 		return
 	}
+	openPath(dir)
+}
+
+// openPath hands a folder or URL to the desktop's default handler.
+func openPath(dir string) {
 	// The launcher hands the folder to the file manager and exits; it is not
 	// waiting for the person looking at it, so it does not get to hang forever.
 	ctx, cancel := context.WithTimeout(context.Background(), openDirTimeout)
@@ -288,7 +293,7 @@ func openHoursDir() {
 	// opens is only explicable from the log.
 	if err := cmd.Start(); err != nil {
 		cancel()
-		log.Printf("open hours dir: %v", err)
+		log.Printf("open %s: %v", dir, err)
 		return
 	}
 	// Reap it: xdg-open exits as soon as the file manager is up, and a zombie
@@ -296,7 +301,7 @@ func openHoursDir() {
 	go func() {
 		defer cancel()
 		if err := cmd.Wait(); err != nil {
-			log.Printf("open hours dir: %v", err)
+			log.Printf("open %s: %v", dir, err)
 		}
 	}()
 }
@@ -305,39 +310,68 @@ func openHoursDir() {
 // block the timer: worst case this device works offline and syncs later.
 var errSyncerNil = errors.New("sync disabled: hours directory not initialized")
 
-func pull() {
+func pull() error {
 	if syncer == nil {
 		syncFail(errSyncerNil)
-		return
+		return errSyncerNil
 	}
 	setSyncStatus("Syncing...")
 	if err := syncer.Pull(); err != nil {
 		log.Printf("gitsync pull: %v", err)
 		syncFail(err)
-		return
+		return err
 	}
 	syncOK()
+	return nil
 }
 
 // push commits the hours folder and publishes it under the given message.
-func push(message string) {
+func push(message string) error {
 	if syncer == nil {
 		syncFail(errSyncerNil)
-		return
+		return errSyncerNil
 	}
 	setSyncStatus("Syncing...")
 	if err := syncer.CommitAndPush("ezhours: " + message); err != nil {
 		log.Printf("gitsync push: %v", err)
 		syncFail(err)
-		return
+		return err
 	}
 	syncOK()
+	return nil
 }
 
 // syncNow is the manual "Sync Now" action: pull, then publish anything local.
+// When the remote turns us away it also sets up access, since a click is the
+// one moment someone is there to finish the job.
 func syncNow() {
-	pull()
-	push("manual sync")
+	errPull := pull()
+	errPush := push("manual sync")
+	if gitsync.IsAuthError(errPull) || gitsync.IsAuthError(errPush) {
+		setupSyncAccess()
+	}
+}
+
+// setupSyncAccess creates the ssh key and switches the remote to SSH, retries,
+// and if the remote still refuses, shows which key to allow where.
+func setupSyncAccess() {
+	setup, err := syncer.SetupAccess()
+	if err != nil {
+		log.Printf("gitsync setup: %v", err)
+		return
+	}
+	if setup.Changed {
+		log.Printf("gitsync setup: remote %s, key %s", setup.Remote, gitsync.KeyFile)
+		// The key may already be allowed (a re-clone of a set up repo).
+		if pull() == nil && push("manual sync") == nil {
+			return
+		}
+	}
+
+	if setup.KeysURL != "" {
+		openPath(setup.KeysURL)
+	}
+	ui.ShowSyncSetup(setup.PublicKey)
 }
 
 func setSyncStatus(text string) {

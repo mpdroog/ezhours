@@ -196,3 +196,46 @@ func TestExistingRemoteIsNotOverwritten(t *testing.T) {
 		t.Errorf("EZHOURS_REMOTE overwrote the configured remote: %s", url)
 	}
 }
+
+// Swapping .git for a fresh clone while ezhours runs must not need a restart.
+func TestPullAfterGitDirReplaced(t *testing.T) {
+	remote := bareRemote(t)
+	a, dirA := newDevice(t, remote)
+	write(t, dirA, "portal.txt", "02sep\n 09:00 - 10:00\nkickoff\n")
+	if err := a.CommitAndPush("entry one"); err != nil {
+		t.Fatalf("A push: %v", err)
+	}
+
+	b, dirB := newDevice(t, remote)
+	if err := b.Pull(); err != nil {
+		t.Fatalf("B pull: %v", err)
+	}
+
+	// Replace B's .git with a fresh clone that has a commit B never saw.
+	write(t, dirA, "portal.txt", "02sep\n 09:00 - 10:00\nkickoff\n 11:00 - 12:00\nreview\n")
+	if err := a.CommitAndPush("entry two"); err != nil {
+		t.Fatalf("A push: %v", err)
+	}
+	clone := t.TempDir()
+	if _, err := git.PlainClone(clone, false, &git.CloneOptions{URL: remote}); err != nil {
+		t.Fatalf("clone: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(dirB, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(clone, ".git"), filepath.Join(dirB, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dirB, "portal.txt", read(t, clone, "portal.txt"))
+
+	write(t, dirB, "nima.txt", "03sep\n 09:00 - 09:30\nstandup\n")
+	if err := b.CommitAndPush("entry three"); err != nil {
+		t.Fatalf("B push after .git swap: %v", err)
+	}
+	if err := a.Pull(); err != nil {
+		t.Fatalf("A pull: %v", err)
+	}
+	if got := read(t, dirA, "nima.txt"); !strings.Contains(got, "standup") {
+		t.Fatalf("A did not receive B's entry: %q", got)
+	}
+}

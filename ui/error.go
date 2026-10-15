@@ -21,19 +21,34 @@ import (
 func ShowSaveError(path, entry string, saveErr error) {
 	body := saveErrorText(path, entry, saveErr)
 
-	var err error
-	switch runtime.GOOS {
-	case "darwin":
-		err = showMacError(body)
-	case "windows":
-		err = showWindowsError(body)
-	default:
-		err = showLinuxError(body)
-	}
+	err := showText("Entry not saved", "EZHours could not save this entry. Copy the text below.", body, false)
 	if err != nil && !cancelled(err) {
 		// The dialog failing is usually the same fault as the save failing, so
 		// this is where the entry ends up if the screen never gets it.
 		log.Printf("save error dialog: %v (entry was: %s)", err, strings.TrimSpace(entry))
+	}
+}
+
+// ShowSyncSetup shows the public key to add as a deploy key, and nothing else:
+// ask fits six lines and the key alone takes three.
+func ShowSyncSetup(publicKey string) {
+	err := showText("Add as deploy key, with write access", "Add as deploy key, with write access", publicKey, true)
+	if err != nil && !cancelled(err) {
+		log.Printf("sync setup dialog: %v", err)
+	}
+}
+
+// showText shows body as selectable text in a window titled title. prompt is
+// the line above it where a platform has room for one (macOS only). ask draws
+// text it cannot select, so copyable gives it a Copy button instead.
+func showText(title, prompt, body string, copyable bool) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return showMacError(title, prompt, body)
+	case "windows":
+		return showWindowsError(title, body)
+	default:
+		return showLinuxError(title, body, copyable)
 	}
 }
 
@@ -52,17 +67,20 @@ func saveErrorText(path, entry string, saveErr error) string {
 // showLinuxError shows the entry as text the user can read back and retype.
 // It is the last copy of the hour, so it goes through the same dialog as
 // everything else rather than a notification that scrolls away.
-func showLinuxError(body string) error {
-	_, err := session.Interactive(body, askBin, "-mode=message",
-		"-title=EZHours \u2014 entry not saved")
+func showLinuxError(title, body string, copyable bool) error {
+	args := []string{"-mode=message", "-title=EZHours \u2014 " + title}
+	if copyable {
+		args = append(args, "-copy")
+	}
+	_, err := session.Interactive(body, askBin, args...)
 	return err
 }
 
 // showMacError puts the text in an editable field, because that is the only
 // part of an AppleScript dialog the user can select from.
-func showMacError(body string) error {
-	script := fmt.Sprintf(`display dialog "EZHours could not save this entry. Copy the text below." default answer %s with title "EZHours - Entry not saved" buttons {"Close"} default button "Close" with icon caution`,
-		appleScriptString(body))
+func showMacError(title, prompt, body string) error {
+	script := fmt.Sprintf(`display dialog %s default answer %s with title %s buttons {"Close"} default button "Close" with icon caution`,
+		appleScriptString(prompt), appleScriptString(body), appleScriptString("EZHours - "+title))
 	_, err := session.Interactive("", "osascript", "-e", script)
 	return err
 }
@@ -89,13 +107,13 @@ func base64Std(s string) string {
 }
 
 // showWindowsError uses a read-only text box, which is still selectable.
-func showWindowsError(body string) error {
+func showWindowsError(title, body string) error {
 	script := fmt.Sprintf(`
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'EZHours - Entry not saved'
+$form.Text = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'))
 $form.Size = New-Object System.Drawing.Size(620,480)
 $form.StartPosition = 'CenterScreen'
 
@@ -118,7 +136,7 @@ $form.AcceptButton = $close
 $form.Controls.Add($close)
 
 $form.ShowDialog() | Out-Null
-`, base64Std(body))
+`, base64Std("EZHours - "+title), base64Std(body))
 
 	_, err := session.Interactive("", "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	return err
