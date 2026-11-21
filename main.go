@@ -145,6 +145,11 @@ const unfiledProject = "UNFILED"
 
 func onTrayClicked() {
 	if dialogOpen {
+		// The dialog is still waiting for an answer -- and if the click is
+		// here, it is most likely nowhere to be seen. Put up a fresh one
+		// rather than ignore the click: ignoring it is what left a hidden
+		// dialog holding the app until a restart.
+		ui.ReopenSaveDialog()
 		return
 	}
 

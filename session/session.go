@@ -75,6 +75,13 @@ func Interactive(stdin, name string, arg ...string) (string, error) {
 	return run(context.Background(), stdin, name, arg...)
 }
 
+// InteractiveContext is Interactive that the caller can call off -- not on a
+// timer, but when it decides the dialog has to go, as ezhours does to replace
+// one that came up where nobody could see it.
+func InteractiveContext(ctx context.Context, stdin, name string, arg ...string) (string, error) {
+	return run(ctx, stdin, name, arg...)
+}
+
 func run(ctx context.Context, stdin, name string, arg ...string) (string, error) {
 	cmd := Command(ctx, name, arg...)
 	if stdin != "" {

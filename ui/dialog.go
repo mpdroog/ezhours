@@ -4,12 +4,14 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mpdroog/ezhours/session"
@@ -61,34 +63,80 @@ func ShowSaveDialog(startTime, endTime time.Time) DialogResult {
 }
 
 func showLinuxDialog(projects []string, timeInfo string) DialogResult {
-	// One dialog, not two. zenity had no way to offer "a project not on
-	// this list" except a magic "+ New Project..." row that then opened a
-	// second box; ask puts an "Add ..." row above the matches as soon as
-	// what you type is not one of them, so naming a new project and
-	// picking an existing one are the same gesture.
-	project, err := ask(strings.Join(projects, "\n"),
+	for {
+		ctx, cancel := context.WithCancel(context.Background())
+		reopen.Lock()
+		reopen.cancel = cancel
+		reopen.Unlock()
+
+		result := askProjectAndDescription(ctx, projects, timeInfo)
+
+		reopen.Lock()
+		reopen.cancel = nil
+		reopen.Unlock()
+		superseded := ctx.Err() != nil
+		cancel()
+		if !superseded {
+			return result
+		}
+		// ReopenSaveDialog closed it to put up a fresh one: nobody
+		// answered anything, so ask again.
+		log.Printf("save dialog reopened")
+	}
+}
+
+// askProjectAndDescription is the whole save dialog, in one window.
+//
+// It used to be two dialogs, project and then description, and the second
+// was started the instant the first closed. On labwc that second window could
+// come up behind everything, unfocused and missing from Alt+Tab, while ezhours
+// waited on it with every tray click ignored. One window has no handoff to
+// lose.
+//
+// The project list is editable: ask offers an "Add ..." row as soon as what is
+// typed is not one of them, so naming a new project and picking an existing
+// one are the same gesture. The description is optional -- ask accepts it
+// blank -- and comes back on the second line.
+func askProjectAndDescription(ctx context.Context, projects []string, timeInfo string) DialogResult {
+	out, err := ask(ctx, strings.Join(projects, "\n"),
 		"-mode=list", "-editable",
 		"-title=EZHours \u2014 save this hour",
-		"-text=Which project is this for?\n"+timeInfo)
+		"-text=Which project is this for?\n"+timeInfo,
+		"-describe=What did you work on?")
 	if err != nil {
 		return dialogFailure(err)
 	}
+	project, description, _ := strings.Cut(out, "\n")
+	project = strings.TrimSpace(project)
 	if project == "" {
 		return DialogResult{Cancelled: true}
 	}
+	return DialogResult{Project: project, Description: strings.TrimSpace(description)}
+}
 
-	// The description is genuinely optional, so a blank one is an answer
-	// rather than a dismissal -- otherwise Enter on an empty box would
-	// throw the hour away.
-	description, err := ask("",
-		"-mode=entry", "-allow-empty",
-		"-title=EZHours \u2014 "+project,
-		"-text=What did you work on?\n"+timeInfo)
-	if err != nil {
-		return dialogFailure(err)
+// reopen is the save dialog currently on screen, so a click on the tray can
+// replace it.
+var reopen struct {
+	sync.Mutex
+	cancel context.CancelFunc
+}
+
+// ReopenSaveDialog closes the save dialog and puts up a fresh one, front and
+// centre, for the same hour. It reports whether there was one to reopen.
+//
+// This is for a dialog nobody can see. The tray ignores clicks while one is
+// open, so a dialog that came up hidden used to leave ezhours unusable until
+// it was restarted, with the hour lost. A fresh window is what reliably
+// appears -- it is how the first one got on screen -- and nothing typed into
+// an invisible one is lost by closing it.
+func ReopenSaveDialog() bool {
+	reopen.Lock()
+	defer reopen.Unlock()
+	if reopen.cancel == nil {
+		return false
 	}
-
-	return DialogResult{Project: project, Description: description}
+	reopen.cancel()
+	return true
 }
 
 // dialogFailure turns one dialog's error into a result: a Cancel when the
@@ -113,13 +161,15 @@ func dialogFailure(err error) DialogResult {
 // show a dialog at all. cancelled below turns that into the distinction
 // the caller needs, and 2 is what stops a missing dialog from ever again
 // being read as a decision to discard.
-const askBin = "ask"
+//
+// A variable only so the tests can stand in a fake.
+var askBin = "ask"
 
 // ask runs one dialog and returns what came back.
-func ask(stdin string, args ...string) (string, error) {
-	out, err := session.Interactive(stdin, askBin, args...)
+func ask(ctx context.Context, stdin string, args ...string) (string, error) {
+	out, err := session.InteractiveContext(ctx, stdin, askBin, args...)
 	if err != nil {
-		if !cancelled(err) {
+		if ctx.Err() == nil && !cancelled(err) {
 			log.Printf("save dialog: %v", err)
 		}
 		return "", err
