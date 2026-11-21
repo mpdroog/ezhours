@@ -113,7 +113,7 @@ func onReady() {
 	}
 
 	// Pick up entries other devices pushed while this one was closed.
-	go pull()
+	go startupPull()
 
 	go func() {
 		for {
@@ -323,6 +323,39 @@ func pull() error {
 	}
 	syncOK()
 	return nil
+}
+
+// startupRetries spaces out the login-time pull while the network comes up:
+// about five minutes in all, after which the failure is shown like any other.
+var startupRetries = []time.Duration{
+	2 * time.Second, 5 * time.Second, 10 * time.Second, 20 * time.Second,
+	30 * time.Second, 60 * time.Second, 60 * time.Second, 60 * time.Second, 60 * time.Second,
+}
+
+// startupPull is pull for the moment the app starts, which at login is usually
+// before the network or the local resolver is up. A network error then is
+// expected, not a failure: it waits and tries again without badging the icon.
+// Any other error (auth, broken repo, no remote) is reported straight away.
+func startupPull() {
+	if syncer == nil {
+		syncFail(errSyncerNil)
+		return
+	}
+	for attempt := 0; ; attempt++ {
+		setSyncStatus("Syncing...")
+		err := syncer.Pull()
+		if err == nil {
+			syncOK()
+			return
+		}
+		if !gitsync.IsNetworkError(err) || attempt >= len(startupRetries) {
+			log.Printf("gitsync pull: %v", err)
+			syncFail(err)
+			return
+		}
+		setSyncStatus("Waiting for network...")
+		time.Sleep(startupRetries[attempt])
+	}
 }
 
 // push commits the hours folder and publishes it under the given message.
