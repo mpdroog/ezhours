@@ -22,8 +22,6 @@ import (
 	"sync"
 
 	"github.com/godbus/dbus/v5"
-	"github.com/jezek/xgb"
-	"github.com/jezek/xgbutil"
 
 	"github.com/mpdroog/osxflow/menu"
 	"github.com/mpdroog/osxflow/sni"
@@ -178,13 +176,10 @@ func run(onReady func()) error {
 		return err
 	}
 
-	xu, err := xgbutil.NewConn()
-	if err != nil {
-		return err
-	}
-	defer xu.Conn().Close()
-
-	host, err := menu.NewHost(xu, 0, menuWidth)
+	// Native on whichever display server the session runs: a layer
+	// surface straight on the compositor under Wayland, an X window on X.
+	// The host owns the connection it dials, and Release closes it.
+	host, err := menu.Dial(0, menuWidth)
 	if err != nil {
 		return err
 	}
@@ -222,10 +217,7 @@ func run(onReady func()) error {
 	// somewhere to go.
 	onReady()
 
-	events := make(chan xgb.Event, 64)
-	gone := make(chan error, 1)
-	go readEvents(host.Conn, events, gone)
-
+	events, gone := host.Events(), host.Gone()
 	for {
 		select {
 		case ev := <-events:
@@ -307,20 +299,6 @@ func openMenu(host *menu.Host, c sni.Click) {
 	}
 	if err := host.Open(centre, rows); err != nil {
 		log.Printf("tray: opening the menu: %v", err)
-	}
-}
-
-func readEvents(conn *xgb.Conn, out chan<- xgb.Event, gone chan<- error) {
-	for {
-		ev, err := conn.WaitForEvent()
-		if err != nil {
-			continue
-		}
-		if ev == nil {
-			gone <- errors.New("the X connection closed")
-			return
-		}
-		out <- ev
 	}
 }
 

@@ -2,13 +2,11 @@ module github.com/mpdroog/ezhours
 
 go 1.26.0
 
-require (
-	fyne.io/systray v1.12.0
-	github.com/jezek/xgb v1.3.1
-	github.com/jezek/xgbutil v0.0.0-20260124183602-9fd151d6a51a
-)
+require fyne.io/systray v1.12.0
 
 require (
+	github.com/jezek/xgb v1.3.1 // indirect
+	github.com/jezek/xgbutil v0.0.0-20260124183602-9fd151d6a51a // indirect
 	golang.org/x/image v0.46.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )

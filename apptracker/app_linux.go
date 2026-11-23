@@ -1,20 +1,11 @@
+//go:build linux
+
 package apptracker
 
 import (
-	"fmt"
+	"errors"
 	"os"
-	"regexp"
-	"strings"
-	"sync"
-
-	"github.com/mpdroog/osxflow/wl"
-
-	"github.com/mpdroog/ezhours/session"
 )
-
-// wmClassRe matches the quoted values of `xprop WM_CLASS`, which reports
-// instance and class: WM_CLASS(STRING) = "Navigator", "firefox"
-var wmClassRe = regexp.MustCompile(`"([^"]*)"`)
 
 // getActiveApp returns the name of the currently active application on Linux.
 // The window class is preferred over the title, because titles change per
@@ -32,125 +23,25 @@ var wmClassRe = regexp.MustCompile(`"([^"]*)"`)
 // The compositor's own answer covers both kinds, because an Xwayland window is
 // a toplevel to it like any other.
 func getActiveApp() (string, error) {
+	f := activeAppX11
 	if onWayland() {
-		return activeAppWayland()
+		f = activeAppWayland
 	}
-	return activeAppX11()
+	if f == nil {
+		return "", errNotBuilt
+	}
+	return f()
 }
 
-func onWayland() bool { return os.Getenv("WAYLAND_DISPLAY") != "" }
+// activeAppX11 and activeAppWayland are set by app_linux_x11.go and
+// app_linux_wayland.go, and nil in a binary built without that half: build
+// with -tags x11 or -tags wayland for only one, as osxflow does.
+var activeAppX11, activeAppWayland func() (string, error)
 
-var (
-	compMu sync.Mutex
-	comp   *wl.Conn
-)
+var errNotBuilt = errors.New("this binary was built without support for the session's display server")
 
-// compositor is the connection to the compositor, opened once and kept. The
-// toplevel list is built from events, so a fresh connection per poll would pay
-// two roundtrips every two seconds to learn what this one already knows.
-func compositor() (*wl.Conn, error) {
-	compMu.Lock()
-	defer compMu.Unlock()
-	if comp != nil {
-		if err := comp.Err(); err != nil {
-			// The compositor went away -- a restart, or the session ending.
-			// Drop it so the next poll dials again rather than reporting the
-			// same corpse forever.
-			comp = nil
-			return nil, fmt.Errorf("compositor connection lost: %w", err)
-		}
-		return comp, nil
-	}
-	c, err := wl.Dial()
-	if err != nil {
-		return nil, err
-	}
-	comp = c
-	return comp, nil
-}
-
-// activeAppWayland asks the compositor directly, over
-// zwlr_foreign_toplevel_management_v1.
-//
-// Nothing here drains the connection's event channel, which is deliberate and
-// safe: wl.Conn drops events nobody is reading rather than blocking its read
-// loop, and the toplevel state this reads is kept up to date by that loop
-// regardless.
-func activeAppWayland() (string, error) {
-	c, err := compositor()
-	if err != nil {
-		return "", err
-	}
-	t, ok := c.Active()
-	if !ok {
-		// Focus is on the desktop, a panel, or nothing.
-		return "", nil
-	}
-	// AppID is the Wayland equivalent of WM_CLASS and is the better key for
-	// the same reason: it names the application, not the document.
-	if s := appIDName(t.AppID); s != "" {
-		return prettify(s), nil
-	}
-	return titleToApp(t.Title), nil
-}
-
-// appIDName reduces a Wayland app_id to something that reads like the name of
-// an application.
-//
-// app_ids are commonly reverse-DNS -- "org.mozilla.firefox", and every flatpak
-// on this desk -- where the last component is the application and everything
-// before it is the vendor. WM_CLASS never looked like that, so the X11 path
-// had no equivalent of this and recorded "Firefox" where an untrimmed app_id
-// would give "Org.mozilla.firefox" and split one app across two names.
-func appIDName(id string) string {
-	s := normalize(id)
-	if i := strings.LastIndex(s, "."); i != -1 && i+1 < len(s) {
-		s = s[i+1:]
-	}
-	return s
-}
-
-// activeAppX11 is the original path, kept for a real X11 session where it is
-// still the right answer. It needs xdotool, which a Wayland-only machine has
-// no reason to install.
-func activeAppX11() (string, error) {
-	out, err := session.Output("xdotool", "getactivewindow")
-	if err != nil {
-		return "", err
-	}
-	win := strings.TrimSpace(out)
-	if win == "" {
-		return "", nil
-	}
-
-	class, err := windowClass(win)
-	if err != nil {
-		return "", err
-	}
-	if class != "" {
-		return prettify(class), nil
-	}
-
-	// Fall back to the title for windows that expose no class.
-	out, err = session.Output("xdotool", "getwindowname", win)
-	if err != nil {
-		return "", err
-	}
-	return titleToApp(out), nil
-}
-
-// windowClass returns the WM_CLASS class of a window. A window that carries no
-// class is "" with no error: plenty do not, which is what the title fallback
-// above is for.
-func windowClass(win string) (string, error) {
-	out, err := session.Output("xprop", "-id", win, "WM_CLASS")
-	if err != nil {
-		return "", fmt.Errorf("window %s: %w", win, err)
-	}
-	m := wmClassRe.FindAllStringSubmatch(out, -1)
-	if len(m) == 0 {
-		return "", nil
-	}
-	// Last value is the class ("firefox"); the first is the instance.
-	return normalize(m[len(m)-1][1]), nil
+// onWayland is whether the Wayland half applies: there is a compositor,
+// or there is no X half to fall back on.
+func onWayland() bool {
+	return activeAppWayland != nil && (os.Getenv("WAYLAND_DISPLAY") != "" || activeAppX11 == nil)
 }
